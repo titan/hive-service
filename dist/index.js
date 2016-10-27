@@ -2,6 +2,7 @@
 const msgpack = require('msgpack-lite');
 const nanomsg_1 = require('nanomsg');
 const fs = require("fs");
+const ip = require('ip');
 const pg_1 = require('pg');
 const redis_1 = require('redis');
 class Server {
@@ -189,3 +190,29 @@ function wait_for_response(cache, reply, rep) {
     setTimeout(timer_callback, 500, cache, reply, rep, 7);
 }
 exports.wait_for_response = wait_for_response;
+function rpc(domain, addr, uid, fun, ...args) {
+    const p = new Promise(function (resolve, reject) {
+        let a = [];
+        if (args != null) {
+            a = [...args];
+        }
+        const params = {
+            ctx: {
+                domain: domain,
+                ip: ip.address(),
+                uid: uid
+            },
+            fun: fun,
+            args: a
+        };
+        const req = nanomsg_1.socket("req");
+        req.connect(addr);
+        req.on("data", (msg) => {
+            resolve(msgpack.decode(msg));
+            req.shutdown(addr);
+        });
+        req.send(msgpack.encode(params));
+    });
+    return p;
+}
+exports.rpc = rpc;

@@ -64,3 +64,4 @@ export declare function async_serial<T>(ps: Promise<T>[], scb: (vals: T[]) => vo
 export declare function async_serial_ignore<T>(ps: Promise<T>[], cb: (vals: T[]) => void): void;
 export declare function fib(n: number): any;
 export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void)): void;
+export declare function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T>;

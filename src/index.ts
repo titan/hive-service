@@ -247,3 +247,30 @@ function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) =
 export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void)) {
   setTimeout(timer_callback, 500, cache, reply, rep, 7);
 }
+
+export function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T> {
+  const p = new Promise<T>(function (resolve, reject) {
+    let a = [];
+    if (args != null) {
+      a = [...args];
+    }
+    const params = {
+      ctx: {
+        domain: domain,
+        ip:     ip.address(),
+        uid:    uid
+      },
+      fun: fun,
+      args: a
+    };
+    const req = socket("req");
+    req.connect(addr);
+
+    req.on("data", (msg) => {
+      resolve(msgpack.decode(msg));
+      req.shutdown(addr);
+    });
+    req.send(msgpack.encode(params));
+  });
+  return p;
+}

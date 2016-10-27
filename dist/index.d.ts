@@ -25,6 +25,7 @@ export declare class Server {
     pub: Socket;
     functions: Map<string, ServerFunction>;
     permissions: Map<string, Map<string, boolean>>;
+    constructor();
     init(serveraddr: string, queueaddr: string, cache: RedisClient): void;
     call(fun: string, permissions: Permission[], impl: ServerFunction): void;
 }

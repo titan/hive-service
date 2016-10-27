@@ -33,6 +33,11 @@ export class Server {
   functions: Map<string, ServerFunction>;
   permissions: Map<string, Map<string, boolean>>; // {function => { domain => permission }}
 
+  constructor() {
+    this.functions = new Map<string, ServerFunction>();
+    this.permissions = new Map<string, Map<string, boolean>>();
+  }
+
   public init(serveraddr: string, queueaddr: string, cache: RedisClient): void {
     this.serveraddr = serveraddr;
     this.queueaddr = queueaddr;
@@ -132,6 +137,7 @@ export class Service {
   config: Config;
   server: Server;
   processors: Processor[];
+
   constructor(config: Config) {
     this.config = config;
   }

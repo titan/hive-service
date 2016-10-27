@@ -5,6 +5,10 @@ const fs = require("fs");
 const pg_1 = require('pg');
 const redis_1 = require('redis');
 class Server {
+    constructor() {
+        this.functions = new Map();
+        this.permissions = new Map();
+    }
     init(serveraddr, queueaddr, cache) {
         this.serveraddr = serveraddr;
         this.queueaddr = queueaddr;

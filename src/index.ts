@@ -214,3 +214,36 @@ function _async_serial_ignore<T>(ps: Promise<T>[], acc: T[], cb: (vals: T[]) => 
     });
   }
 }
+
+function fib_iter(a: number, b: number, p: number, q: number, n: number) {
+  if (n === 0) {
+    return b;
+  }
+  if (n % 2 === 0) {
+    return fib_iter(a, b, p * p + q * q, 2 * p * q + q * q, n / 2);
+  }
+  return fib_iter(a * p + a * q + b * q, b * p + a * q, p, q, n - 1);
+}
+
+export function fib(n: number) {
+  return fib_iter(1, 0, 0, 1, n);
+}
+
+function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) => void), countdown: number) {
+  cache.get(reply, (err: Error, result) => {
+    if (result) {
+      rep(JSON.parse(result));
+    } else if (countdown === 0) {
+      rep({
+        code: 408,
+        msg: "Request Timeout"
+      });
+    } else {
+      setTimeout(timer_callback, fib(8 - countdown) * 1000, cache, reply, rep, countdown - 1);
+    }
+  });
+}
+
+export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void)) {
+  setTimeout(timer_callback, 500, cache, reply, rep, 7);
+}

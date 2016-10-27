@@ -127,7 +127,6 @@ export class Processor {
 export interface Config {
   serveraddr: string;
   queueaddr: string;
-  cacheaddr: string;
   dbhost: string,
   dbuser: string,
   dbport?: number,

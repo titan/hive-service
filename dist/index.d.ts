@@ -12,8 +12,8 @@ export interface ServerContext {
     domain: string;
     ip: string;
     uid: string;
-    queue: Socket;
     cache: RedisClient;
+    publish: ((pkg: CmdPacket) => void);
 }
 export interface ServerFunction {
     (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;

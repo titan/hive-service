@@ -16,8 +16,8 @@ export interface ServerContext {
   domain: string;
   ip: string;
   uid: string;
-  queue: Socket;
   cache: RedisClient;
+  publish: ((pkg: CmdPacket) => void);
 }
 
 export interface ServerFunction {
@@ -51,13 +51,13 @@ export class Server {
     this.rep.on("data", function (buf: NodeBuffer) {
       const pkt = msgpack.decode(buf);
       const ctx: ServerContext = pkt.ctx; /* Domain, IP, User */
-      ctx.queue = _self.pub;
       ctx.cache = cache;
       const fun: string = pkt.fun;
       const args: any[] = pkt.args;
       if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
         const func: ServerFunction = _self.functions.get(fun);
         if (args != null) {
+          ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
           func(ctx, function(result) {
             _self.rep.send(msgpack.encode(result));
           }, ...args);

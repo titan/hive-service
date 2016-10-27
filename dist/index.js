@@ -20,13 +20,13 @@ class Server {
         this.rep.on("data", function (buf) {
             const pkt = msgpack.decode(buf);
             const ctx = pkt.ctx;
-            ctx.queue = _self.pub;
             ctx.cache = cache;
             const fun = pkt.fun;
             const args = pkt.args;
             if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
                 const func = _self.functions.get(fun);
                 if (args != null) {
+                    ctx.publish = (pkt) => _self.pub.send(msgpack.encode(pkt));
                     func(ctx, function (result) {
                         _self.rep.send(msgpack.encode(result));
                     }, ...args);

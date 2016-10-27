@@ -36,6 +36,7 @@ export declare class Processor {
     queueaddr: string;
     sock: Socket;
     functions: Map<string, ProcessorFunction>;
+    constructor();
     init(queueaddr: string, pool: Pool, cache: RedisClient): void;
     call(cmd: string, impl: ProcessorFunction): void;
 }

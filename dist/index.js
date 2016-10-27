@@ -49,6 +49,9 @@ class Server {
 }
 exports.Server = Server;
 class Processor {
+    constructor() {
+        this.functions = new Map();
+    }
     init(queueaddr, pool, cache) {
         this.queueaddr = queueaddr;
         this.sock = nanomsg_1.socket("sub");

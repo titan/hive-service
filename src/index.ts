@@ -87,6 +87,10 @@ export class Processor {
   sock: Socket;
   functions: Map<string, ProcessorFunction>;
 
+  constructor() {
+    this.functions = new Map<string, ProcessorFunction>();
+  }
+
   public init(queueaddr: string, pool: Pool, cache: RedisClient): void {
     this.queueaddr = queueaddr;
     this.sock = socket("sub");

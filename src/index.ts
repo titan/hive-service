@@ -1,4 +1,5 @@
 import * as msgpack from 'msgpack-lite';
+import * as crypto from "crypto";
 import { Socket, socket } from 'nanomsg';
 import * as fs from "fs";
 import * as ip from 'ip';
@@ -49,7 +50,9 @@ export class Server {
     const _self = this;
 
     this.rep.on("data", function (buf: NodeBuffer) {
-      const pkt = msgpack.decode(buf);
+      const data = msgpack.decode(buf);
+      const pkt = data.pkt;
+      const sn = data.sn;
       const ctx: ServerContext = pkt.ctx; /* Domain, IP, User */
       ctx.cache = cache;
       const fun: string = pkt.fun;
@@ -59,15 +62,18 @@ export class Server {
         if (args != null) {
           ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
           func(ctx, function(result) {
-            _self.rep.send(msgpack.encode(result));
+            const payload = msgpack.encode(result);
+            _self.rep.send(msgpack.encode({ sn, payload }));
           }, ...args);
         } else {
           func(ctx, function(result) {
-            _self.rep.send(msgpack.encode(result));
+            const payload = msgpack.encode(result);
+            _self.rep.send(msgpack.encode({ sn, payload }));
           });
         }
       } else {
-        _self.rep.send(msgpack.encode({ code: 403, msg: "Forbidden" }));
+        const payload = msgpack.encode({code: 403, msg: "Forbidden"});
+        _self.rep.send(msgpack.encode({ sn, payload }));
       }
     });
   }
@@ -263,14 +269,20 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
       fun: fun,
       args: a
     };
+    const sn = crypto.randomBytes(64).toString("base64");
     const req = socket("req");
     req.connect(addr);
 
     req.on("data", (msg) => {
-      resolve(msgpack.decode(msg));
+      const data: Object = msgpack.decode(msg);
+      if (sn === data["sn"]) {
+        resolve(data["payload"]);
+      } else {
+        reject(new Error("Invalid calling sequence number"));
+      }
       req.shutdown(addr);
     });
-    req.send(msgpack.encode(params));
+    req.send(msgpack.encode({ sn, payload: msgpack.encode(params)}));
   });
   return p;
 }

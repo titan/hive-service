@@ -1,14 +1,14 @@
-import * as msgpack from 'msgpack-lite';
+import * as msgpack from "msgpack-lite";
 import * as crypto from "crypto";
-import { Socket, socket } from 'nanomsg';
+import { Socket, socket } from "nanomsg";
 import * as fs from "fs";
-import * as ip from 'ip';
-import { Pool, Client as PGClient } from 'pg';
-import { createClient, RedisClient} from 'redis';
+import * as ip from "ip";
+import { Pool, Client as PGClient } from "pg";
+import { createClient, RedisClient} from "redis";
 
 export interface CmdPacket {
-  cmd: string,
-  args: any[]
+  cmd: string;
+  args: any[];
 }
 
 export type Permission = [string, boolean];
@@ -102,7 +102,7 @@ export class Processor {
     this.sock = socket("sub");
     this.sock.connect(this.queueaddr);
     const _self = this;
-    this.sock.on('data', (buf: NodeBuffer) => {
+    this.sock.on("data", (buf: NodeBuffer) => {
       const pkt: CmdPacket = msgpack.decode(buf);
       if (_self.functions.has(pkt.cmd)) {
         pool.connect().then(db => {
@@ -133,13 +133,13 @@ export class Processor {
 export interface Config {
   serveraddr: string;
   queueaddr: string;
-  dbhost: string,
-  dbuser: string,
-  dbport?: number,
-  database: string,
-  dbpasswd: string,
-  cachehost: string,
-  cacheport?: number
+  dbhost: string;
+  dbuser: string;
+  dbport?: number;
+  database: string;
+  dbpasswd: string;
+  cachehost: string;
+  cacheport?: number;
 }
 
 export class Service {

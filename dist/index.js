@@ -1,11 +1,11 @@
 "use strict";
-const msgpack = require('msgpack-lite');
+const msgpack = require("msgpack-lite");
 const crypto = require("crypto");
-const nanomsg_1 = require('nanomsg');
+const nanomsg_1 = require("nanomsg");
 const fs = require("fs");
-const ip = require('ip');
-const pg_1 = require('pg');
-const redis_1 = require('redis');
+const ip = require("ip");
+const pg_1 = require("pg");
+const redis_1 = require("redis");
 class Server {
     constructor() {
         this.functions = new Map();
@@ -64,7 +64,7 @@ class Processor {
         this.sock = nanomsg_1.socket("sub");
         this.sock.connect(this.queueaddr);
         const _self = this;
-        this.sock.on('data', (buf) => {
+        this.sock.on("data", (buf) => {
             const pkt = msgpack.decode(buf);
             if (_self.functions.has(pkt.cmd)) {
                 pool.connect().then(db => {

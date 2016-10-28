@@ -1,8 +1,8 @@
 /// <reference types="nanomsg" />
 /// <reference types="node" />
-import { Socket } from 'nanomsg';
-import { Pool, Client as PGClient } from 'pg';
-import { RedisClient } from 'redis';
+import { Socket } from "nanomsg";
+import { Pool, Client as PGClient } from "pg";
+import { RedisClient } from "redis";
 export interface CmdPacket {
     cmd: string;
     args: any[];

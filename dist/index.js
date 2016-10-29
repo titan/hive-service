@@ -96,6 +96,7 @@ exports.Processor = Processor;
 class Service {
     constructor(config) {
         this.config = config;
+        this.processors = [];
     }
     registerServer(server) {
         this.server = server;

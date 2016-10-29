@@ -149,6 +149,7 @@ export class Service {
 
   constructor(config: Config) {
     this.config = config;
+    this.processors = [];
   }
 
   public registerServer(server: Server): void {

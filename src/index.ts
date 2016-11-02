@@ -84,37 +84,64 @@ export class Server {
   }
 }
 
+export interface ProcessorContext {
+  db: PGClient;
+  cache: RedisClient;
+  done: (() => void);
+  publish: ((pkg: CmdPacket) => void);
+}
+
 export interface ProcessorFunction {
-  (db: PGClient, cache: RedisClient, done: (() => void), ...args: any[]): void;
+  (ctx: ProcessorContext, ...args: any[]): void;
 }
 
 export class Processor {
   queueaddr: string;
   sock: Socket;
+  pub: Socket;
   functions: Map<string, ProcessorFunction>;
+  subqueueaddr: string;
+  subprocessors: Processor[];
 
-  constructor() {
+  constructor(subqueueaddr?: string) {
     this.functions = new Map<string, ProcessorFunction>();
+    this.subprocessors = [];
+    if (subqueueaddr) {
+      this.subqueueaddr = subqueueaddr;
+      const path = subqueueaddr.substring(subqueueaddr.indexOf("///") + 2, subqueueaddr.length);
+      if (fs.existsSync(path)) {
+        fs.unlinkSync(path); // make nanomsg happy
+      }
+    }
   }
 
   public init(queueaddr: string, pool: Pool, cache: RedisClient): void {
     this.queueaddr = queueaddr;
     this.sock = socket("sub");
     this.sock.connect(this.queueaddr);
+    if (this.subqueueaddr) {
+      this.pub = socket("pub");
+      this.pub.bind(this.subqueueaddr);
+      for (const subprocessor of this.subprocessors) {
+        subprocessor.init(this.subqueueaddr, pool, cache);
+      }
+    }
     const _self = this;
     this.sock.on("data", (buf: NodeBuffer) => {
       const pkt: CmdPacket = msgpack.decode(buf);
       if (_self.functions.has(pkt.cmd)) {
         pool.connect().then(db => {
           const func = _self.functions.get(pkt.cmd);
+          let ctx: ProcessorContext = {
+            db,
+            cache,
+            done: () => { db.release(); },
+            publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+          };
           if (pkt.args) {
-            func(db, cache, () => {
-              db.release();
-            }, ...pkt.args);
+            func(ctx, ...pkt.args);
           } else {
-            func(db, cache, () => {
-              db.release();
-            });
+            func(ctx);
           }
         }).catch(e => {
           console.log("DB connection error " + e.stack);
@@ -123,6 +150,10 @@ export class Processor {
         console.error(pkt.cmd + " not found!");
       }
     });
+  }
+
+  public registerSubProcessor(processor: Processor): void {
+    this.subprocessors.push(processor);
   }
 
   public call(cmd: string, impl: ProcessorFunction): void {

@@ -56,28 +56,45 @@ class Server {
 }
 exports.Server = Server;
 class Processor {
-    constructor() {
+    constructor(subqueueaddr) {
         this.functions = new Map();
+        this.subprocessors = [];
+        if (subqueueaddr) {
+            this.subqueueaddr = subqueueaddr;
+            const path = subqueueaddr.substring(subqueueaddr.indexOf("///") + 2, subqueueaddr.length);
+            if (fs.existsSync(path)) {
+                fs.unlinkSync(path);
+            }
+        }
     }
     init(queueaddr, pool, cache) {
         this.queueaddr = queueaddr;
         this.sock = nanomsg_1.socket("sub");
         this.sock.connect(this.queueaddr);
+        if (this.subqueueaddr) {
+            this.pub = nanomsg_1.socket("pub");
+            this.pub.bind(this.subqueueaddr);
+            for (const subprocessor of this.subprocessors) {
+                subprocessor.init(this.subqueueaddr, pool, cache);
+            }
+        }
         const _self = this;
         this.sock.on("data", (buf) => {
             const pkt = msgpack.decode(buf);
             if (_self.functions.has(pkt.cmd)) {
                 pool.connect().then(db => {
                     const func = _self.functions.get(pkt.cmd);
+                    let ctx = {
+                        db,
+                        cache,
+                        done: () => { db.release(); },
+                        publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+                    };
                     if (pkt.args) {
-                        func(db, cache, () => {
-                            db.release();
-                        }, ...pkt.args);
+                        func(ctx, ...pkt.args);
                     }
                     else {
-                        func(db, cache, () => {
-                            db.release();
-                        });
+                        func(ctx);
                     }
                 }).catch(e => {
                     console.log("DB connection error " + e.stack);
@@ -87,6 +104,9 @@ class Processor {
                 console.error(pkt.cmd + " not found!");
             }
         });
+    }
+    registerSubProcessor(processor) {
+        this.subprocessors.push(processor);
     }
     call(cmd, impl) {
         this.functions.set(cmd, impl);

@@ -29,15 +29,25 @@ export declare class Server {
     init(serveraddr: string, queueaddr: string, cache: RedisClient): void;
     call(fun: string, permissions: Permission[], impl: ServerFunction): void;
 }
+export interface ProcessorContext {
+    db: PGClient;
+    cache: RedisClient;
+    done: (() => void);
+    publish: ((pkg: CmdPacket) => void);
+}
 export interface ProcessorFunction {
-    (db: PGClient, cache: RedisClient, done: (() => void), ...args: any[]): void;
+    (ctx: ProcessorContext, ...args: any[]): void;
 }
 export declare class Processor {
     queueaddr: string;
     sock: Socket;
+    pub: Socket;
     functions: Map<string, ProcessorFunction>;
-    constructor();
+    subqueueaddr: string;
+    subprocessors: Processor[];
+    constructor(subqueueaddr?: string);
     init(queueaddr: string, pool: Pool, cache: RedisClient): void;
+    registerSubProcessor(processor: Processor): void;
     call(cmd: string, impl: ProcessorFunction): void;
 }
 export interface Config {

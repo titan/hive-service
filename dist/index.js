@@ -23,7 +23,16 @@ class Server {
             const data = msgpack.decode(buf);
             const pkt = data.pkt;
             const sn = data.sn;
-            const ctx = pkt.ctx;
+            const ctx = {
+                domain: undefined,
+                ip: undefined,
+                uid: undefined,
+                cache: undefined,
+                publish: undefined
+            };
+            for (const key in pkt.ctx) {
+                ctx[key] = pkt.ctx[key];
+            }
             ctx.cache = cache;
             const fun = pkt.fun;
             const args = pkt.args;

@@ -53,7 +53,16 @@ export class Server {
       const data = msgpack.decode(buf);
       const pkt = data.pkt;
       const sn = data.sn;
-      const ctx: ServerContext = pkt.ctx; /* Domain, IP, User */
+      const ctx: ServerContext = {
+        domain: undefined,
+        ip: undefined,
+        uid: undefined,
+        cache: undefined,
+        publish: undefined
+      };
+      for (const key in pkt.ctx /* Domain, IP, User */) {
+        ctx[key] = pkt.ctx[key];
+      }
       ctx.cache = cache;
       const fun: string = pkt.fun;
       const args: any[] = pkt.args;

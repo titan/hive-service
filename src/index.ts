@@ -327,3 +327,9 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
   });
   return p;
 }
+
+export interface Paging<T> {
+  offset: number;
+  limit: number;
+  data: T[];
+}

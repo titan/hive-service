@@ -75,3 +75,8 @@ export declare function async_serial_ignore<T>(ps: Promise<T>[], cb: (vals: T[])
 export declare function fib(n: number): any;
 export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void)): void;
 export declare function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T>;
+export interface Paging<T> {
+    offset: number;
+    limit: number;
+    data: T[];
+}

@@ -329,6 +329,7 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
 }
 
 export interface Paging<T> {
+  count: number;
   offset: number;
   limit: number;
   data: T[];

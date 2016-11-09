@@ -58,7 +58,7 @@ class Server {
             }
         });
     }
-    call(fun, permissions, impl) {
+    call(fun, permissions, name, description, impl) {
         this.functions.set(fun, impl);
         this.permissions.set(fun, new Map(permissions));
     }

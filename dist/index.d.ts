@@ -27,7 +27,7 @@ export declare class Server {
     permissions: Map<string, Map<string, boolean>>;
     constructor();
     init(serveraddr: string, queueaddr: string, cache: RedisClient): void;
-    call(fun: string, permissions: Permission[], impl: ServerFunction): void;
+    call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void;
 }
 export interface ProcessorContext {
     db: PGClient;

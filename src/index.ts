@@ -87,7 +87,7 @@ export class Server {
     });
   }
 
-  public call(fun: string, permissions: Permission[], impl: ServerFunction): void {
+  public call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void {
     this.functions.set(fun, impl);
     this.permissions.set(fun, new Map(permissions));
   }

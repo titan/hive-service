@@ -317,13 +317,13 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
     req.on("data", (msg) => {
       const data: Object = msgpack.decode(msg);
       if (sn === data["sn"]) {
-        resolve(data["payload"]);
+        resolve(msgpack.decode(data["payload"]));
       } else {
         reject(new Error("Invalid calling sequence number"));
       }
       req.shutdown(addr);
     });
-    req.send(msgpack.encode({ sn, payload: msgpack.encode(params)}));
+    req.send(msgpack.encode({ sn, pkg: params }));
   });
   return p;
 }

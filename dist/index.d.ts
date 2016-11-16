@@ -23,6 +23,7 @@ export declare class Server {
     queueaddr: string;
     rep: Socket;
     pub: Socket;
+    pair: Socket;
     functions: Map<string, ServerFunction>;
     permissions: Map<string, Map<string, boolean>>;
     constructor();

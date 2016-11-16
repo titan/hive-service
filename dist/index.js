@@ -18,45 +18,51 @@ class Server {
         this.rep.bind(this.serveraddr);
         this.pub = nanomsg_1.socket("pub");
         this.pub.bind(this.queueaddr);
+        this.pair = nanomsg_1.socket("pair");
+        const lastnumber = parseInt(this.serveraddr[this.serveraddr.length - 1]) + 1;
+        const newaddr = this.serveraddr.substr(0, this.serveraddr.length - 1) + lastnumber.toString();
+        this.pair.bind(newaddr);
         const _self = this;
-        this.rep.on("data", function (buf) {
-            const data = msgpack.decode(buf);
-            const pkt = data.pkt;
-            const sn = data.sn;
-            const ctx = {
-                domain: undefined,
-                ip: undefined,
-                uid: undefined,
-                cache: undefined,
-                publish: undefined
-            };
-            for (const key in pkt.ctx) {
-                ctx[key] = pkt.ctx[key];
-            }
-            ctx.cache = cache;
-            const fun = pkt.fun;
-            const args = pkt.args;
-            if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
-                const func = _self.functions.get(fun);
-                if (args != null) {
-                    ctx.publish = (pkt) => _self.pub.send(msgpack.encode(pkt));
-                    func(ctx, function (result) {
-                        const payload = msgpack.encode(result);
-                        _self.rep.send(msgpack.encode({ sn, payload }));
-                    }, ...args);
+        for (const sock of [this.rep, this.pair]) {
+            sock.on("data", function (buf) {
+                const data = msgpack.decode(buf);
+                const pkt = data.pkt;
+                const sn = data.sn;
+                const ctx = {
+                    domain: undefined,
+                    ip: undefined,
+                    uid: undefined,
+                    cache: undefined,
+                    publish: undefined
+                };
+                for (const key in pkt.ctx) {
+                    ctx[key] = pkt.ctx[key];
+                }
+                ctx.cache = cache;
+                const fun = pkt.fun;
+                const args = pkt.args;
+                if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
+                    const func = _self.functions.get(fun);
+                    if (args != null) {
+                        ctx.publish = (pkt) => _self.pub.send(msgpack.encode(pkt));
+                        func(ctx, function (result) {
+                            const payload = msgpack.encode(result);
+                            sock.send(msgpack.encode({ sn, payload }));
+                        }, ...args);
+                    }
+                    else {
+                        func(ctx, function (result) {
+                            const payload = msgpack.encode(result);
+                            sock.send(msgpack.encode({ sn, payload }));
+                        });
+                    }
                 }
                 else {
-                    func(ctx, function (result) {
-                        const payload = msgpack.encode(result);
-                        _self.rep.send(msgpack.encode({ sn, payload }));
-                    });
+                    const payload = msgpack.encode({ code: 403, msg: "Forbidden" });
+                    sock.send(msgpack.encode({ sn, payload }));
                 }
-            }
-            else {
-                const payload = msgpack.encode({ code: 403, msg: "Forbidden" });
-                _self.rep.send(msgpack.encode({ sn, payload }));
-            }
-        });
+            });
+        }
     }
     call(fun, permissions, name, description, impl) {
         this.functions.set(fun, impl);
@@ -247,14 +253,14 @@ function rpc(domain, addr, uid, fun, ...args) {
         req.on("data", (msg) => {
             const data = msgpack.decode(msg);
             if (sn === data["sn"]) {
-                resolve(data["payload"]);
+                resolve(msgpack.decode(data["payload"]));
             }
             else {
                 reject(new Error("Invalid calling sequence number"));
             }
             req.shutdown(addr);
         });
-        req.send(msgpack.encode({ sn, payload: msgpack.encode(params) }));
+        req.send(msgpack.encode({ sn, pkt: params }));
     });
     return p;
 }

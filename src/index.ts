@@ -30,6 +30,7 @@ export class Server {
   queueaddr: string;
   rep: Socket;
   pub: Socket;
+  pair: Socket;
 
   functions: Map<string, ServerFunction>;
   permissions: Map<string, Map<string, boolean>>; // {function => { domain => permission }}
@@ -46,45 +47,51 @@ export class Server {
     this.rep.bind(this.serveraddr);
     this.pub = socket("pub");
     this.pub.bind(this.queueaddr);
+    this.pair = socket("pair");
+    const lastnumber = parseInt(this.serveraddr[this.serveraddr.length - 1]) + 1;
+    const newaddr = this.serveraddr.substr(0, this.serveraddr.length - 1) + lastnumber.toString();
+    this.pair.bind(newaddr);
 
     const _self = this;
 
-    this.rep.on("data", function (buf: NodeBuffer) {
-      const data = msgpack.decode(buf);
-      const pkt = data.pkt;
-      const sn = data.sn;
-      const ctx: ServerContext = {
-        domain: undefined,
-        ip: undefined,
-        uid: undefined,
-        cache: undefined,
-        publish: undefined
-      };
-      for (const key in pkt.ctx /* Domain, IP, User */) {
-        ctx[key] = pkt.ctx[key];
-      }
-      ctx.cache = cache;
-      const fun: string = pkt.fun;
-      const args: any[] = pkt.args;
-      if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
-        const func: ServerFunction = _self.functions.get(fun);
-        if (args != null) {
-          ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
-          func(ctx, function(result) {
-            const payload = msgpack.encode(result);
-            _self.rep.send(msgpack.encode({ sn, payload }));
-          }, ...args);
-        } else {
-          func(ctx, function(result) {
-            const payload = msgpack.encode(result);
-            _self.rep.send(msgpack.encode({ sn, payload }));
-          });
+    for (const sock of [this.rep, this.pair]) {
+      sock.on("data", function (buf: NodeBuffer) {
+        const data = msgpack.decode(buf);
+        const pkt = data.pkt;
+        const sn = data.sn;
+        const ctx: ServerContext = {
+          domain: undefined,
+          ip: undefined,
+          uid: undefined,
+          cache: undefined,
+          publish: undefined
+        };
+        for (const key in pkt.ctx /* Domain, IP, User */) {
+          ctx[key] = pkt.ctx[key];
         }
-      } else {
-        const payload = msgpack.encode({code: 403, msg: "Forbidden"});
-        _self.rep.send(msgpack.encode({ sn, payload }));
-      }
-    });
+        ctx.cache = cache;
+        const fun: string = pkt.fun;
+        const args: any[] = pkt.args;
+        if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
+          const func: ServerFunction = _self.functions.get(fun);
+          if (args != null) {
+            ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
+            func(ctx, function(result) {
+              const payload = msgpack.encode(result);
+              sock.send(msgpack.encode({ sn, payload }));
+            }, ...args);
+          } else {
+            func(ctx, function(result) {
+              const payload = msgpack.encode(result);
+              sock.send(msgpack.encode({ sn, payload }));
+            });
+          }
+        } else {
+          const payload = msgpack.encode({code: 403, msg: "Forbidden"});
+          sock.send(msgpack.encode({ sn, payload }));
+        }
+      });
+    }
   }
 
   public call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void {
@@ -323,7 +330,7 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
       }
       req.shutdown(addr);
     });
-    req.send(msgpack.encode({ sn, pkg: params }));
+    req.send(msgpack.encode({ sn, pkt: params }));
   });
   return p;
 }

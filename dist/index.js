@@ -12,18 +12,17 @@ class Server {
         this.permissions = new Map();
     }
     init(serveraddr, queueaddr, cache) {
-        this.serveraddr = serveraddr;
         this.queueaddr = queueaddr;
         this.rep = nanomsg_1.socket("rep");
-        this.rep.bind(this.serveraddr);
+        this.rep.bind(serveraddr);
         this.pub = nanomsg_1.socket("pub");
         this.pub.bind(this.queueaddr);
+        const lastnumber = parseInt(serveraddr[serveraddr.length - 1]) + 1;
+        const newaddr = serveraddr.substr(0, serveraddr.length - 1) + lastnumber.toString();
         this.pair = nanomsg_1.socket("pair");
-        const lastnumber = parseInt(this.serveraddr[this.serveraddr.length - 1]) + 1;
-        const newaddr = this.serveraddr.substr(0, this.serveraddr.length - 1) + lastnumber.toString();
         this.pair.bind(newaddr);
         const _self = this;
-        for (const sock of [this.rep, this.pair]) {
+        for (const sock of [this.pair, this.rep]) {
             sock.on("data", function (buf) {
                 const data = msgpack.decode(buf);
                 const pkt = data.pkt;

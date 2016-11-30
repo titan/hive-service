@@ -26,7 +26,6 @@ export interface ServerFunction {
 }
 
 export class Server {
-  serveraddr: string;
   queueaddr: string;
   rep: Socket;
   pub: Socket;
@@ -41,20 +40,19 @@ export class Server {
   }
 
   public init(serveraddr: string, queueaddr: string, cache: RedisClient): void {
-    this.serveraddr = serveraddr;
     this.queueaddr = queueaddr;
     this.rep = socket("rep");
-    this.rep.bind(this.serveraddr);
+    this.rep.bind(serveraddr);
     this.pub = socket("pub");
     this.pub.bind(this.queueaddr);
+    const lastnumber = parseInt(serveraddr[serveraddr.length - 1]) + 1;
+    const newaddr = serveraddr.substr(0, serveraddr.length - 1) + lastnumber.toString();
     this.pair = socket("pair");
-    const lastnumber = parseInt(this.serveraddr[this.serveraddr.length - 1]) + 1;
-    const newaddr = this.serveraddr.substr(0, this.serveraddr.length - 1) + lastnumber.toString();
     this.pair.bind(newaddr);
 
     const _self = this;
 
-    for (const sock of [this.rep, this.pair]) {
+    for (const sock of [this.pair, this.rep]) {
       sock.on("data", function (buf: NodeBuffer) {
         const data = msgpack.decode(buf);
         const pkt = data.pkt;

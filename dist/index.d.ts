@@ -19,7 +19,6 @@ export interface ServerFunction {
     (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
 }
 export declare class Server {
-    serveraddr: string;
     queueaddr: string;
     rep: Socket;
     pub: Socket;

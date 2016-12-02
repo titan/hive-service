@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const nanomsg_1 = require("nanomsg");
 const fs = require("fs");
 const ip = require("ip");
+const bluebird = require("bluebird");
 const pg_1 = require("pg");
 const redis_1 = require("redis");
 class Server {
@@ -144,6 +145,7 @@ class Service {
             fs.unlinkSync(path);
         }
         const cache = redis_1.createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost);
+        const cacheAsync = bluebird.promisifyAll(cache);
         const dbconfig = {
             host: this.config.dbhost,
             user: this.config.dbuser,
@@ -155,7 +157,7 @@ class Service {
             idleTimeoutMillis: 30000,
         };
         const pool = new pg_1.Pool(dbconfig);
-        this.server.init(this.config.serveraddr, this.config.queueaddr, cache);
+        this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
         for (const processor of this.processors) {
             processor.init(this.config.queueaddr, pool, cache);
         }

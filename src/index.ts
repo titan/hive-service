@@ -3,6 +3,7 @@ import * as crypto from "crypto";
 import { Socket, socket } from "nanomsg";
 import * as fs from "fs";
 import * as ip from "ip";
+import * as bluebird from "bluebird";
 import { Pool, Client as PGClient } from "pg";
 import { createClient, RedisClient} from "redis";
 
@@ -211,7 +212,8 @@ export class Service {
       fs.unlinkSync(path); // make nanomsg happy
     }
 
-    const cache = createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost);
+    const cache: RedisClient = createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost);
+    const cacheAsync : RedisClient = bluebird.promisifyAll(cache) as RedisClient;
     const dbconfig = {
       host: this.config.dbhost,
       user: this.config.dbuser,
@@ -224,7 +226,7 @@ export class Service {
     };
     const pool = new Pool(dbconfig);
 
-    this.server.init(this.config.serveraddr, this.config.queueaddr, cache);
+    this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
     for (const processor of this.processors) {
       processor.init(this.config.queueaddr, pool, cache);
     }

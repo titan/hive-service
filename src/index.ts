@@ -4,6 +4,7 @@ import { Socket, socket } from "nanomsg";
 import * as fs from "fs";
 import * as ip from "ip";
 import * as bluebird from "bluebird";
+import * as zlib from "zlib";
 import { Pool, Client as PGClient } from "pg";
 import { createClient, RedisClient} from "redis";
 
@@ -77,7 +78,17 @@ export class Server {
             ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
             func(ctx, function(result) {
               const payload = msgpack.encode(result);
-              sock.send(msgpack.encode({ sn, payload }));
+              if (payload.length > 1024) {
+                zlib.deflate(payload, (e: Error, newbuf: Buffer) => {
+                  if (e) {
+                    sock.send(msgpack.encode({ sn, payload }));
+                  } else {
+                    sock.send(msgpack.encode({ sn, payload: newbuf }));
+                  }
+                });
+              } else {
+                sock.send(msgpack.encode({ sn, payload }));
+              }
             }, ...args);
           } else {
             func(ctx, function(result) {
@@ -324,7 +335,17 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
     req.on("data", (msg) => {
       const data: Object = msgpack.decode(msg);
       if (sn === data["sn"]) {
-        resolve(msgpack.decode(data["payload"]));
+        if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
+          zlib.inflate(data["payload"], (e: Error, newbuf: Buffer) => {
+            if (e) {
+              reject(e);
+            } else {
+              resolve(msgpack.decode(newbuf));
+            }
+          });
+        } else {
+          resolve(msgpack.decode(data["payload"]));
+        }
       } else {
         reject(new Error("Invalid calling sequence number"));
       }

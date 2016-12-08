@@ -5,6 +5,7 @@ const nanomsg_1 = require("nanomsg");
 const fs = require("fs");
 const ip = require("ip");
 const bluebird = require("bluebird");
+const zlib = require("zlib");
 const pg_1 = require("pg");
 const redis_1 = require("redis");
 class Server {
@@ -47,7 +48,19 @@ class Server {
                         ctx.publish = (pkt) => _self.pub.send(msgpack.encode(pkt));
                         func(ctx, function (result) {
                             const payload = msgpack.encode(result);
-                            sock.send(msgpack.encode({ sn, payload }));
+                            if (payload.length > 1024) {
+                                zlib.deflate(payload, (e, newbuf) => {
+                                    if (e) {
+                                        sock.send(msgpack.encode({ sn, payload }));
+                                    }
+                                    else {
+                                        sock.send(msgpack.encode({ sn, payload: newbuf }));
+                                    }
+                                });
+                            }
+                            else {
+                                sock.send(msgpack.encode({ sn, payload }));
+                            }
                         }, ...args);
                     }
                     else {
@@ -254,7 +267,19 @@ function rpc(domain, addr, uid, fun, ...args) {
         req.on("data", (msg) => {
             const data = msgpack.decode(msg);
             if (sn === data["sn"]) {
-                resolve(msgpack.decode(data["payload"]));
+                if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
+                    zlib.inflate(data["payload"], (e, newbuf) => {
+                        if (e) {
+                            reject(e);
+                        }
+                        else {
+                            resolve(msgpack.decode(newbuf));
+                        }
+                    });
+                }
+                else {
+                    resolve(msgpack.decode(data["payload"]));
+                }
             }
             else {
                 reject(new Error("Invalid calling sequence number"));

@@ -169,7 +169,7 @@ class Service {
         if (fs.existsSync(path)) {
             fs.unlinkSync(path);
         }
-        const cache = redis_1.createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost);
+        const cache = redis_1.createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost, { "return_buffers": true });
         const cacheAsync = bluebird.promisifyAll(cache);
         const dbconfig = {
             host: this.config.dbhost,

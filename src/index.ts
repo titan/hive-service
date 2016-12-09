@@ -233,7 +233,7 @@ export class Service {
       fs.unlinkSync(path); // make nanomsg happy
     }
 
-    const cache: RedisClient = createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost);
+    const cache: RedisClient = createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost, { "return_buffers": true });
     const cacheAsync : RedisClient = bluebird.promisifyAll(cache) as RedisClient;
     const dbconfig = {
       host: this.config.dbhost,

@@ -93,7 +93,17 @@ export class Server {
           } else {
             func(ctx, function(result) {
               const payload = msgpack.encode(result);
-              sock.send(msgpack.encode({ sn, payload }));
+              if (payload.length > 1024) {
+                zlib.deflate(payload, (e: Error, newbuf: Buffer) => {
+                  if (e) {
+                    sock.send(msgpack.encode({ sn, payload }));
+                  } else {
+                    sock.send(msgpack.encode({ sn, payload: newbuf }));
+                  }
+                });
+              } else {
+                sock.send(msgpack.encode({ sn, payload }));
+              }
             });
           }
         } else {

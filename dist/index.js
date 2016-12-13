@@ -303,3 +303,40 @@ function rpc(domain, addr, uid, fun, ...args) {
     return p;
 }
 exports.rpc = rpc;
+function encode(obj) {
+    return new Promise((resolve, reject) => {
+        const buf = msgpack.encode(obj);
+        if (buf.length > 1024) {
+            return zlib.deflate(buf, (e, newbuf) => {
+                if (e) {
+                    reject(e);
+                }
+                else {
+                    resolve(newbuf);
+                }
+            });
+        }
+        else {
+            resolve(buf);
+        }
+    });
+}
+exports.encode = encode;
+function decode(buf) {
+    return new Promise((resolve, reject) => {
+        if (buf[0] === 0x78 && buf[1] === 0x9c) {
+            zlib.inflate(buf, (e, newbuf) => {
+                if (e) {
+                    reject(e);
+                }
+                else {
+                    resolve(msgpack.decode(newbuf));
+                }
+            });
+        }
+        else {
+            resolve(msgpack.decode(buf));
+        }
+    });
+}
+exports.decode = decode;

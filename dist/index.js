@@ -303,7 +303,7 @@ function rpc(domain, addr, uid, fun, ...args) {
     return p;
 }
 exports.rpc = rpc;
-function encode(obj) {
+function msgpack_encode(obj) {
     return new Promise((resolve, reject) => {
         const buf = msgpack.encode(obj);
         if (buf.length > 1024) {
@@ -321,8 +321,8 @@ function encode(obj) {
         }
     });
 }
-exports.encode = encode;
-function decode(buf) {
+exports.msgpack_encode = msgpack_encode;
+function msgpack_decode(buf) {
     return new Promise((resolve, reject) => {
         if (buf[0] === 0x78 && buf[1] === 0x9c) {
             zlib.inflate(buf, (e, newbuf) => {
@@ -339,4 +339,4 @@ function decode(buf) {
         }
     });
 }
-exports.decode = decode;
+exports.msgpack_decode = msgpack_decode;

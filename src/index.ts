@@ -373,7 +373,7 @@ export interface Paging<T> {
   data: T[];
 }
 
-export function encode(obj: any): Promise<Buffer> {
+export function msgpack_encode(obj: any): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const buf = msgpack.encode(obj);
     if (buf.length > 1024) {
@@ -390,7 +390,7 @@ export function encode(obj: any): Promise<Buffer> {
   });
 }
 
-export function decode(buf: Buffer): Promise<any> {
+export function msgpack_decode(buf: Buffer): Promise<any> {
   return new Promise<Buffer>((resolve, reject) => {
     if (buf[0] === 0x78 && buf[1] === 0x9c) {
       zlib.inflate(buf, (e: Error, newbuf: Buffer) => {

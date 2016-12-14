@@ -81,5 +81,5 @@ export interface Paging<T> {
     limit: number;
     data: T[];
 }
-export declare function encode(obj: any): Promise<Buffer>;
-export declare function decode(buf: Buffer): Promise<any>;
+export declare function msgpack_encode(obj: any): Promise<Buffer>;
+export declare function msgpack_decode(buf: Buffer): Promise<any>;

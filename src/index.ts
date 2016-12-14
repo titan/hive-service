@@ -249,7 +249,7 @@ export class Service {
 
     this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
     for (const processor of this.processors) {
-      processor.init(this.config.queueaddr, pool, cache);
+      processor.init(this.config.queueaddr, pool, cacheAsync);
     }
   }
 }

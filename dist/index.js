@@ -286,14 +286,14 @@ function rpc(domain, addr, uid, fun, ...args) {
                             reject(e);
                         }
                         else {
-                            resolve(msgpack.decode(newbuf));
                             req.shutdown(addr);
+                            resolve(msgpack.decode(newbuf));
                         }
                     });
                 }
                 else {
-                    resolve(msgpack.decode(data["payload"]));
                     req.shutdown(addr);
+                    resolve(msgpack.decode(data["payload"]));
                 }
             }
             else {

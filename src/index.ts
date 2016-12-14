@@ -351,13 +351,13 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
               req.shutdown(addr);
               reject(e);
             } else {
-              resolve(msgpack.decode(newbuf));
               req.shutdown(addr);
+              resolve(msgpack.decode(newbuf));
             }
           });
         } else {
-          resolve(msgpack.decode(data["payload"]));
           req.shutdown(addr);
+          resolve(msgpack.decode(data["payload"]));
         }
       } else {
         req.shutdown(addr);

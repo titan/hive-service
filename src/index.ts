@@ -348,18 +348,21 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
         if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
           zlib.inflate(data["payload"], (e: Error, newbuf: Buffer) => {
             if (e) {
+              req.shutdown(addr);
               reject(e);
             } else {
               resolve(msgpack.decode(newbuf));
+              req.shutdown(addr);
             }
           });
         } else {
           resolve(msgpack.decode(data["payload"]));
+          req.shutdown(addr);
         }
       } else {
+        req.shutdown(addr);
         reject(new Error("Invalid calling sequence number"));
       }
-      req.shutdown(addr);
     });
     req.send(msgpack.encode({ sn, pkt: params }));
   });

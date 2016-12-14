@@ -282,22 +282,22 @@ function rpc(domain, addr, uid, fun, ...args) {
                 if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
                     zlib.inflate(data["payload"], (e, newbuf) => {
                         if (e) {
-                            req.shutdown(addr);
+                            req.close();
                             reject(e);
                         }
                         else {
-                            req.shutdown(addr);
+                            req.close();
                             resolve(msgpack.decode(newbuf));
                         }
                     });
                 }
                 else {
-                    req.shutdown(addr);
+                    req.close();
                     resolve(msgpack.decode(data["payload"]));
                 }
             }
             else {
-                req.shutdown(addr);
+                req.close();
                 reject(new Error("Invalid calling sequence number"));
             }
         });

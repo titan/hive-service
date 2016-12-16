@@ -14,7 +14,7 @@ declare module "redis" {
     hgetAsync(key: string, field: string): Promise<any>;
     hincrbyAsync(key: string, field: string, value: number): Promise<any>;
     lpushAsync(key: string, value: string | number): Promise<any>;
-    setexAsync(key: string, ttl: number, value: string): Promise<any>;
+    setexAsync(key: string, ttl: number, value: string | Buffer): Promise<any>;
     zrevrangebyscoreAsync(key: string, start: number, stop: number): Promise<any>;
   }
   export interface Multi extends NodeJS.EventEmitter {
@@ -337,8 +337,20 @@ export function wait_for_response(cache: RedisClient, reply: string, rep: ((resu
   setTimeout(timer_callback, 500, cache, reply, rep, retry + 1, retry);
 }
 
-export function set_for_response(cache: RedisClient, key: string, value: any, timeout: number = 30) {
-  cache.setex(key, timeout, msgpack_encode(value));
+export function set_for_response(cache: RedisClient, key: string, value: any, timeout: number = 30): Promise<any> {
+  return new Promise((resolve, reject) => {
+    msgpack_encode(value).then(buf => {
+      cache.setex(key, timeout, buf, (e: Error, _: any) => {
+        if (e) {
+          reject(e);
+        } else {
+          resolve();
+        }
+      });
+    }).catch(e => {
+      reject(e);
+    });
+  });
 }
 
 export function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T> {

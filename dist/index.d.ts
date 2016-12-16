@@ -1,8 +1,21 @@
-/// <reference types="nanomsg" />
 /// <reference types="node" />
+/// <reference types="nanomsg" />
 import { Socket } from "nanomsg";
 import { Pool, Client as PGClient } from "pg";
 import { RedisClient } from "redis";
+declare module "redis" {
+    interface RedisClient extends NodeJS.EventEmitter {
+        incrAsync(key: string): Promise<any>;
+        hgetAsync(key: string, field: string): Promise<any>;
+        hincrbyAsync(key: string, field: string, value: number): Promise<any>;
+        lpushAsync(key: string, value: string | number): Promise<any>;
+        setexAsync(key: string, ttl: number, value: string | Buffer): Promise<any>;
+        zrevrangebyscoreAsync(key: string, start: number, stop: number): Promise<any>;
+    }
+    interface Multi extends NodeJS.EventEmitter {
+        execAsync(): Promise<any>;
+    }
+}
 export interface CmdPacket {
     cmd: string;
     args: any[];
@@ -73,7 +86,8 @@ export declare class Service {
 export declare function async_serial<T>(ps: Promise<T>[], scb: (vals: T[]) => void, fcb: (e: Error) => void): void;
 export declare function async_serial_ignore<T>(ps: Promise<T>[], cb: (vals: T[]) => void): void;
 export declare function fib(n: number): any;
-export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void)): void;
+export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry?: number): void;
+export declare function set_for_response(cache: RedisClient, key: string, value: any, timeout?: number): Promise<any>;
 export declare function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T>;
 export interface Paging<T> {
     count: number;
@@ -82,4 +96,4 @@ export interface Paging<T> {
     data: T[];
 }
 export declare function msgpack_encode(obj: any): Promise<Buffer>;
-export declare function msgpack_decode(buf: Buffer): Promise<any>;
+export declare function msgpack_decode<T>(buf: Buffer): Promise<T>;

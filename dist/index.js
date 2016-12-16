@@ -259,7 +259,20 @@ function wait_for_response(cache, reply, rep, retry = 7) {
 }
 exports.wait_for_response = wait_for_response;
 function set_for_response(cache, key, value, timeout = 30) {
-    cache.setex(key, timeout, msgpack_encode(value));
+    return new Promise((resolve, reject) => {
+        msgpack_encode(value).then(buf => {
+            cache.setex(key, timeout, buf, (e, _) => {
+                if (e) {
+                    reject(e);
+                }
+                else {
+                    resolve();
+                }
+            });
+        }).catch(e => {
+            reject(e);
+        });
+    });
 }
 exports.set_for_response = set_for_response;
 function rpc(domain, addr, uid, fun, ...args) {

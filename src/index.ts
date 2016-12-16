@@ -6,7 +6,21 @@ import * as ip from "ip";
 import * as bluebird from "bluebird";
 import * as zlib from "zlib";
 import { Pool, Client as PGClient } from "pg";
-import { createClient, RedisClient} from "redis";
+import { createClient, RedisClient, Multi } from "redis";
+
+declare module "redis" {
+  export interface RedisClient extends NodeJS.EventEmitter {
+    incrAsync(key: string): Promise<any>;
+    hgetAsync(key: string, field: string): Promise<any>;
+    hincrbyAsync(key: string, field: string, value: number): Promise<any>;
+    lpushAsync(key: string, value: string | number): Promise<any>;
+    setexAsync(key: string, ttl: number, value: string): Promise<any>;
+    zrevrangebyscoreAsync(key: string, start: number, stop: number): Promise<any>;
+  }
+  export interface Multi extends NodeJS.EventEmitter {
+    execAsync(): Promise<any>;
+  }
+}
 
 export interface CmdPacket {
   cmd: string;
@@ -304,7 +318,7 @@ export function fib(n: number) {
   return fib_iter(1, 0, 0, 1, n);
 }
 
-function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) => void), countdown: number) {
+function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) => void), retry: number, countdown: number) {
   cache.get(reply, (err: Error, result) => {
     if (result) {
       rep(JSON.parse(result));
@@ -314,13 +328,17 @@ function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) =
         msg: "Request Timeout"
       });
     } else {
-      setTimeout(timer_callback, fib(8 - countdown) * 1000, cache, reply, rep, countdown - 1);
+      setTimeout(timer_callback, fib(retry - countdown) * 1000, cache, reply, rep, retry, countdown - 1);
     }
   });
 }
 
-export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void)) {
-  setTimeout(timer_callback, 500, cache, reply, rep, 7);
+export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry: number = 7) {
+  setTimeout(timer_callback, 500, cache, reply, rep, retry + 1, retry);
+}
+
+export function set_for_response(cache: RedisClient, key: string, value: any, timeout: number = 30) {
+  cache.setex(key, timeout, msgpack_encode(value));
 }
 
 export function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T> {
@@ -393,18 +411,20 @@ export function msgpack_encode(obj: any): Promise<Buffer> {
   });
 }
 
-export function msgpack_decode(buf: Buffer): Promise<any> {
-  return new Promise<Buffer>((resolve, reject) => {
+export function msgpack_decode<T>(buf: Buffer): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     if (buf[0] === 0x78 && buf[1] === 0x9c) {
       zlib.inflate(buf, (e: Error, newbuf: Buffer) => {
         if (e) {
           reject(e);
         } else {
-          resolve(msgpack.decode(newbuf));
+          const result: T = msgpack.decode(newbuf) as T;
+          resolve(result);
         }
       });
     } else {
-      resolve(msgpack.decode(buf));
+      const result: T = msgpack.decode(buf) as T;
+      resolve(result);
     }
   });
 }

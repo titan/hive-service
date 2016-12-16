@@ -238,7 +238,7 @@ function fib(n) {
     return fib_iter(1, 0, 0, 1, n);
 }
 exports.fib = fib;
-function timer_callback(cache, reply, rep, countdown) {
+function timer_callback(cache, reply, rep, retry, countdown) {
     cache.get(reply, (err, result) => {
         if (result) {
             rep(JSON.parse(result));
@@ -250,14 +250,18 @@ function timer_callback(cache, reply, rep, countdown) {
             });
         }
         else {
-            setTimeout(timer_callback, fib(8 - countdown) * 1000, cache, reply, rep, countdown - 1);
+            setTimeout(timer_callback, fib(retry - countdown) * 1000, cache, reply, rep, retry, countdown - 1);
         }
     });
 }
-function wait_for_response(cache, reply, rep) {
-    setTimeout(timer_callback, 500, cache, reply, rep, 7);
+function wait_for_response(cache, reply, rep, retry = 7) {
+    setTimeout(timer_callback, 500, cache, reply, rep, retry + 1, retry);
 }
 exports.wait_for_response = wait_for_response;
+function set_for_response(cache, key, value, timeout = 30) {
+    cache.setex(key, timeout, msgpack_encode(value));
+}
+exports.set_for_response = set_for_response;
 function rpc(domain, addr, uid, fun, ...args) {
     const p = new Promise(function (resolve, reject) {
         let a = [];
@@ -333,12 +337,14 @@ function msgpack_decode(buf) {
                     reject(e);
                 }
                 else {
-                    resolve(msgpack.decode(newbuf));
+                    const result = msgpack.decode(newbuf);
+                    resolve(result);
                 }
             });
         }
         else {
-            resolve(msgpack.decode(buf));
+            const result = msgpack.decode(buf);
+            resolve(result);
         }
     });
 }

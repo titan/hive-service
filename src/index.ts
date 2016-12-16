@@ -319,12 +319,19 @@ export function fib(n: number) {
 }
 
 function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) => void), retry: number, countdown: number) {
-  cache.get(reply, (err: Error, result) => {
+  cache.get(reply, (err: Error, result: Buffer) => {
     if (result) {
-      rep(JSON.parse(result));
+      msgpack_decode<any>(result).then(obj => {
+        rep(obj);
+      }).catch((e: Error) => {
+        rep({
+          code: 540,
+          msg: e.message
+        });
+      });
     } else if (countdown === 0) {
       rep({
-        code: 408,
+        code: 504,
         msg: "Request Timeout"
       });
     } else {

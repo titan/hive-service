@@ -241,11 +241,18 @@ exports.fib = fib;
 function timer_callback(cache, reply, rep, retry, countdown) {
     cache.get(reply, (err, result) => {
         if (result) {
-            rep(JSON.parse(result));
+            msgpack_decode(result).then(obj => {
+                rep(obj);
+            }).catch((e) => {
+                rep({
+                    code: 540,
+                    msg: e.message
+                });
+            });
         }
         else if (countdown === 0) {
             rep({
-                code: 408,
+                code: 504,
                 msg: "Request Timeout"
             });
         }

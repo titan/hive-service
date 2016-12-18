@@ -105,6 +105,7 @@ export class Server {
               }
             }, ...args);
           } else {
+            ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
             func(ctx, function(result) {
               const payload = msgpack.encode(result);
               if (payload.length > 1024) {

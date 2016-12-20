@@ -83,8 +83,6 @@ export declare class Service {
     registerProcessor(processor: Processor): void;
     run(): void;
 }
-export declare function async_serial<T>(ps: Promise<T>[], scb: (vals: T[]) => void, fcb: (e: Error) => void): void;
-export declare function async_serial_ignore<T>(ps: Promise<T>[], cb: (vals: T[]) => void): void;
 export declare function fib(n: number): any;
 export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry?: number): void;
 export declare function set_for_response(cache: RedisClient, key: string, value: any, timeout?: number): Promise<any>;

@@ -269,42 +269,6 @@ export class Service {
   }
 }
 
-export function async_serial<T>(ps: Promise<T>[], scb: (vals: T[]) => void, fcb: (e: Error) => void) {
-  _async_serial<T>(ps, [], scb, fcb);
-}
-
-function _async_serial<T>(ps: Promise<T>[], acc: T[], scb: (vals: T[]) => void, fcb: (e: Error) => void) {
-  if (ps.length === 0) {
-    scb(acc);
-  } else {
-    let p = ps.shift();
-    p.then(val => {
-      acc.push(val);
-      _async_serial(ps, acc, scb, fcb);
-    }).catch((e: Error) => {
-      fcb(e);
-    });
-  }
-}
-
-export function async_serial_ignore<T>(ps: Promise<T>[], cb: (vals: T[]) => void) {
-  _async_serial_ignore<T>(ps, [], cb);
-}
-
-function _async_serial_ignore<T>(ps: Promise<T>[], acc: T[], cb: (vals: T[]) => void) {
-  if (ps.length === 0) {
-    cb(acc);
-  } else {
-    let p = ps.shift();
-    p.then(val => {
-      acc.push(val);
-      _async_serial_ignore(ps, acc, cb);
-    }).catch((e: Error) => {
-      _async_serial_ignore(ps, acc, cb);
-    });
-  }
-}
-
 function fib_iter(a: number, b: number, p: number, q: number, n: number) {
   if (n === 0) {
     return b;

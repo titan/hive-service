@@ -190,42 +190,6 @@ class Service {
     }
 }
 exports.Service = Service;
-function async_serial(ps, scb, fcb) {
-    _async_serial(ps, [], scb, fcb);
-}
-exports.async_serial = async_serial;
-function _async_serial(ps, acc, scb, fcb) {
-    if (ps.length === 0) {
-        scb(acc);
-    }
-    else {
-        let p = ps.shift();
-        p.then(val => {
-            acc.push(val);
-            _async_serial(ps, acc, scb, fcb);
-        }).catch((e) => {
-            fcb(e);
-        });
-    }
-}
-function async_serial_ignore(ps, cb) {
-    _async_serial_ignore(ps, [], cb);
-}
-exports.async_serial_ignore = async_serial_ignore;
-function _async_serial_ignore(ps, acc, cb) {
-    if (ps.length === 0) {
-        cb(acc);
-    }
-    else {
-        let p = ps.shift();
-        p.then(val => {
-            acc.push(val);
-            _async_serial_ignore(ps, acc, cb);
-        }).catch((e) => {
-            _async_serial_ignore(ps, acc, cb);
-        });
-    }
-}
 function fib_iter(a, b, p, q, n) {
     if (n === 0) {
         return b;

@@ -23,8 +23,8 @@ declare module "redis" {
     rpoplpushAsync(source: string, destination: string): Promise<any>;
     rpushAsync(key: string, value: string | number | Buffer): Promise<any>;
     saddAsync(key: string, mumber: string | number | Buffer): Promise<any>;
-    setAsync(key: string, value: string | Buffer): Promise<any>;
-    setexAsync(key: string, ttl: number, value: string | Buffer): Promise<any>;
+    setAsync(key: string, value: string | number | Buffer): Promise<any>;
+    setexAsync(key: string, ttl: number, value: string | number | Buffer): Promise<any>;
     sismemberAsync(key: string, value: string | Buffer): Promise<any>;
     zaddAsync(key: string, score: number, member: string | number | Buffer): Promise<any>;
     zcountAsync(key: string, min: string | number, max: string | number): Promise<any>;

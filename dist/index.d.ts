@@ -5,10 +5,13 @@ import { Pool, Client as PGClient } from "pg";
 import { RedisClient } from "redis";
 declare module "redis" {
     interface RedisClient extends NodeJS.EventEmitter {
-        incrAsync(key: string): Promise<any>;
+        decrAsync(key: string): Promise<any>;
+        delAsync(key: string): Promise<any>;
+        hdelAsync(key: string, field: string): Promise<any>;
         hgetAsync(key: string, field: string): Promise<any>;
         hsetAsync(key: string, field: string, value: string | Buffer): Promise<any>;
         hincrbyAsync(key: string, field: string, value: number): Promise<any>;
+        incrAsync(key: string): Promise<any>;
         lindexAsync(key: string, index: number): Promise<any>;
         lpopAsync(key: string): Promise<any>;
         lpushAsync(key: string, value: string | number | Buffer): Promise<any>;

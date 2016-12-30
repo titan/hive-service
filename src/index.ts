@@ -16,7 +16,7 @@ declare module "redis" {
     hincrbyAsync(key: string, field: string, value: number): Promise<any>;
     lindexAsync(key: string, index: number): Promise<any>;
     lpopAsync(key: string): Promise<any>;
-    lpushAsync(key: string, value: string | number): Promise<any>;
+    lpushAsync(key: string, value: string | number | Buffer): Promise<any>;
     lrangeAsync(key: string, start: number, stop: number): Promise<any>;
     lremAsync(key: string, count: number, value: string | number | Buffer): Promise<any>;
     rpopAsync(key: string): Promise<any>;

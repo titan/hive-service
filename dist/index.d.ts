@@ -7,9 +7,23 @@ declare module "redis" {
     interface RedisClient extends NodeJS.EventEmitter {
         incrAsync(key: string): Promise<any>;
         hgetAsync(key: string, field: string): Promise<any>;
+        hsetAsync(key: string, field: string, value: string | Buffer): Promise<any>;
         hincrbyAsync(key: string, field: string, value: number): Promise<any>;
+        lindexAsync(key: string, index: number): Promise<any>;
+        lpopAsync(key: string): Promise<any>;
         lpushAsync(key: string, value: string | number): Promise<any>;
+        lrangeAsync(key: string, start: number, stop: number): Promise<any>;
+        lremAsync(key: string, count: number, value: string | number | Buffer): Promise<any>;
+        rpopAsync(key: string): Promise<any>;
+        rpoplpushAsync(source: string, destination: string): Promise<any>;
+        rpushAsync(key: string, value: string | number | Buffer): Promise<any>;
+        saddAsync(key: string, mumber: string | number | Buffer): Promise<any>;
+        setAsync(key: string, value: string | Buffer): Promise<any>;
         setexAsync(key: string, ttl: number, value: string | Buffer): Promise<any>;
+        sismemberAsync(key: string, value: string | Buffer): Promise<any>;
+        zaddAsync(key: string, score: number, member: string | number | Buffer): Promise<any>;
+        zcountAsync(key: string, min: string | number, max: string | number): Promise<any>;
+        zrangeAsync(key: string, start: number, stop: number): Promise<any>;
         zrevrangebyscoreAsync(key: string, start: number, stop: number): Promise<any>;
     }
     interface Multi extends NodeJS.EventEmitter {

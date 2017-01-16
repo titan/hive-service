@@ -14,8 +14,11 @@ declare module "redis" {
     delAsync(key: string): Promise<any>;
     hdelAsync(key: string, field: string): Promise<any>;
     hgetAsync(key: string, field: string): Promise<any>;
-    hsetAsync(key: string, field: string, value: string | Buffer): Promise<any>;
+    hgetallAsync(key: string): Promise<any>;
     hincrbyAsync(key: string, field: string, value: number): Promise<any>;
+    hkeysAsync(key: string): Promise<any>;
+    hsetAsync(key: string, field: string, value: string | Buffer): Promise<any>;
+    hvalsAsync(key: string): Promise<any>;
     incrAsync(key: string): Promise<any>;
     lindexAsync(key: string, index: number): Promise<any>;
     lpopAsync(key: string): Promise<any>;

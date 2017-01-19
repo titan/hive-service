@@ -37,6 +37,7 @@ declare module "redis" {
     }
 }
 export interface CmdPacket {
+    sn?: string;
     cmd: string;
     args: any[];
 }

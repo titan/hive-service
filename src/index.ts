@@ -46,6 +46,7 @@ declare module "redis" {
 }
 
 export interface CmdPacket {
+  sn?: string;
   cmd: string;
   args: any[];
 }
@@ -144,7 +145,7 @@ export class Server {
         const args: any[] = pkt.args;
         if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
           const [asynced, impl] = _self.functions.get(fun);
-          ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
+          ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode({...pkt, sn}));
           if (args != null) {
             if (!asynced) {
               const func = impl as ServerFunction;
@@ -259,7 +260,7 @@ export class Processor {
             const ctx: ProcessorContext = {
               db,
               cache,
-              done: () => { db.release(); },
+              done: () => {},
               publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
             };
             try {

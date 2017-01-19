@@ -262,10 +262,16 @@ export class Processor {
               done: () => { db.release(); },
               publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
             };
-            if (pkt.args) {
-              func(ctx, ...pkt.args);
-            } else {
-              func(ctx);
+            try {
+              if (pkt.args) {
+                func(ctx, ...pkt.args);
+              } else {
+                func(ctx);
+              }
+            } catch (e) {
+              console.log("Error " + e.stack);
+            } finally {
+              db.release();
             }
           }).catch(e => {
             console.log("DB connection error " + e.stack);

@@ -84,7 +84,7 @@ function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void))
 }
 
 async function server_msgpack_async(sn: string, obj: any) {
-  const payload = await msgpack_encode(obj);
+  const payload = await Promise.resolve(msgpack.encode(obj));
   if (payload.length > 1024) {
     try {
       const newbuf = await zlib_deflate(payload);

@@ -8,6 +8,9 @@ import * as zlib from "zlib";
 import { Pool, Client as PGClient } from "pg";
 import { createClient, RedisClient, Multi } from "redis";
 
+const zlib_deflate = bluebird.promisify(zlib.deflate);
+const zlib_inflate = bluebird.promisify(zlib.inflate);
+
 declare module "redis" {
   export interface RedisClient extends NodeJS.EventEmitter {
     decrAsync(key: string): Promise<any>;
@@ -61,17 +64,50 @@ export interface ServerFunction {
   (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
 }
 
+export interface AsyncServerFunction {
+  (ctx: ServerContext, ...reset: any[]): Promise<any>;
+}
+
+function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void)) {
+  const payload = msgpack.encode(obj);
+  if (payload.length > 1024) {
+    zlib.deflate(payload, (e: Error, newbuf: Buffer) => {
+      if (e) {
+        callback(msgpack.encode({ sn, payload }));
+      } else {
+        callback(msgpack.encode({ sn, payload: newbuf }));
+      }
+    });
+  } else {
+    callback(msgpack.encode({ sn, payload }));
+  }
+}
+
+async function server_msgpack_async(sn: string, obj: any) {
+  const payload = await msgpack_encode(obj);
+  if (payload.length > 1024) {
+    try {
+      const newbuf = await zlib_deflate(payload);
+      return msgpack_encode({ sn, payload: newbuf });
+    } catch (e1) {
+      return msgpack_encode({ sn, payload });
+    }
+  } else {
+    return msgpack_encode({ sn, payload });
+  }
+}
+
 export class Server {
   queueaddr: string;
   rep: Socket;
   pub: Socket;
   pair: Socket;
 
-  functions: Map<string, ServerFunction>;
+  functions: Map<string, [boolean, ServerFunction | AsyncServerFunction]>;
   permissions: Map<string, Map<string, boolean>>; // {function => { domain => permission }}
 
   constructor() {
-    this.functions = new Map<string, ServerFunction>();
+    this.functions = new Map<string, [boolean, ServerFunction | AsyncServerFunction]>();
     this.permissions = new Map<string, Map<string, boolean>>();
   }
 
@@ -107,42 +143,49 @@ export class Server {
         const fun: string = pkt.fun;
         const args: any[] = pkt.args;
         if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
-          const func: ServerFunction = _self.functions.get(fun);
+          const [asynced, impl] = _self.functions.get(fun);
+          ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
           if (args != null) {
-            ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
-            func(ctx, function(result) {
-              const payload = msgpack.encode(result);
-              if (payload.length > 1024) {
-                zlib.deflate(payload, (e: Error, newbuf: Buffer) => {
-                  if (e) {
-                    sock.send(msgpack.encode({ sn, payload }));
-                  } else {
-                    sock.send(msgpack.encode({ sn, payload: newbuf }));
-                  }
+            if (!asynced) {
+              const func = impl as ServerFunction;
+              func(ctx, function(result) {
+                server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
+              }, ...args);
+            } else {
+              const func = impl as AsyncServerFunction;
+              (async () => {
+                const result: any = await func(ctx, ...args);
+                const pkt = await server_msgpack_async(sn, result);
+                sock.send(pkt);
+              })().catch(e => {
+                const payload = msgpack.encode({ code: 500, msg: e.message });
+                msgpack_encode({ sn, payload }).then(pkt => {
+                  sock.send(pkt);
                 });
-              } else {
-                sock.send(msgpack.encode({ sn, payload }));
-              }
-            }, ...args);
+              });
+            }
           } else {
-            ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode(pkt));
-            func(ctx, function(result) {
-              const payload = msgpack.encode(result);
-              if (payload.length > 1024) {
-                zlib.deflate(payload, (e: Error, newbuf: Buffer) => {
-                  if (e) {
-                    sock.send(msgpack.encode({ sn, payload }));
-                  } else {
-                    sock.send(msgpack.encode({ sn, payload: newbuf }));
-                  }
+            if (!asynced) {
+              const func = impl as ServerFunction;
+              func(ctx, function(result) {
+                server_msgpack(sn, result, sock.send);
+              });
+            } else {
+              const func = impl as AsyncServerFunction;
+              (async () => {
+                  const result: any = await func(ctx);
+                  const pkt = await server_msgpack_async(sn, result);
+                  sock.send(pkt);
+              })().catch(e => {
+                const payload = msgpack.encode({ code: 500, msg: e.message });
+                msgpack_encode({ sn, payload }).then(pkt => {
+                  sock.send(pkt);
                 });
-              } else {
-                sock.send(msgpack.encode({ sn, payload }));
-              }
-            });
+              });
+            }
           }
         } else {
-          const payload = msgpack.encode({code: 403, msg: "Forbidden"});
+          const payload = msgpack.encode({ code: 403, msg: "Forbidden" });
           sock.send(msgpack.encode({ sn, payload }));
         }
       });
@@ -150,7 +193,12 @@ export class Server {
   }
 
   public call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void {
-    this.functions.set(fun, impl);
+    this.functions.set(fun,[false, impl]);
+    this.permissions.set(fun, new Map(permissions));
+  }
+
+  public callAsync(fun: string, permissions: Permission[], name: string, description: string, impl: AsyncServerFunction): void {
+    this.functions.set(fun, [true, impl]);
     this.permissions.set(fun, new Map(permissions));
   }
 }
@@ -166,16 +214,20 @@ export interface ProcessorFunction {
   (ctx: ProcessorContext, ...args: any[]): void;
 }
 
+export interface AsyncProcessorFunction {
+  (ctx: ProcessorContext, ...args: any[]): Promise<any>;
+}
+
 export class Processor {
   queueaddr: string;
   sock: Socket;
   pub: Socket;
-  functions: Map<string, ProcessorFunction>;
+  functions: Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>;
   subqueueaddr: string;
   subprocessors: Processor[];
 
   constructor(subqueueaddr?: string) {
-    this.functions = new Map<string, ProcessorFunction>();
+    this.functions = new Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>();
     this.subprocessors = [];
     if (subqueueaddr) {
       this.subqueueaddr = subqueueaddr;
@@ -201,22 +253,45 @@ export class Processor {
     this.sock.on("data", (buf: NodeBuffer) => {
       const pkt: CmdPacket = msgpack.decode(buf);
       if (_self.functions.has(pkt.cmd)) {
-        pool.connect().then(db => {
-          const func = _self.functions.get(pkt.cmd);
-          let ctx: ProcessorContext = {
-            db,
-            cache,
-            done: () => { db.release(); },
-            publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
-          };
-          if (pkt.args) {
-            func(ctx, ...pkt.args);
-          } else {
-            func(ctx);
-          }
-        }).catch(e => {
-          console.log("DB connection error " + e.stack);
-        });
+        const [asynced, func] = _self.functions.get(pkt.cmd);
+        if (!asynced) {
+          pool.connect().then(db => {
+            const ctx: ProcessorContext = {
+              db,
+              cache,
+              done: () => { db.release(); },
+              publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+            };
+            if (pkt.args) {
+              func(ctx, ...pkt.args);
+            } else {
+              func(ctx);
+            }
+          }).catch(e => {
+            console.log("DB connection error " + e.stack);
+          });
+        } else {
+          (async () => {
+            const db = await pool.connect();
+            const ctx: ProcessorContext = {
+              db,
+              cache,
+              done: () => {},
+              publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+            };
+            try {
+              if (pkt.args) {
+                await func(ctx, ...pkt.args);
+              } else {
+                await func(ctx);
+              }
+            } finally {
+              db.release();
+            }
+          })().catch(e => {
+              console.log("error " + e.stack);
+          });
+        }
       } else {
         console.error(pkt.cmd + " not found!");
       }
@@ -228,7 +303,11 @@ export class Processor {
   }
 
   public call(cmd: string, impl: ProcessorFunction): void {
-    this.functions.set(cmd, impl);
+    this.functions.set(cmd, [false, impl]);
+  }
+
+  public callAsync(cmd: string, impl: AsyncProcessorFunction): void {
+    this.functions.set(cmd, [true, impl]);
   }
 }
 

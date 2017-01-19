@@ -51,16 +51,20 @@ export interface ServerContext {
 export interface ServerFunction {
     (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
 }
+export interface AsyncServerFunction {
+    (ctx: ServerContext, ...reset: any[]): Promise<any>;
+}
 export declare class Server {
     queueaddr: string;
     rep: Socket;
     pub: Socket;
     pair: Socket;
-    functions: Map<string, ServerFunction>;
+    functions: Map<string, [boolean, ServerFunction | AsyncServerFunction]>;
     permissions: Map<string, Map<string, boolean>>;
     constructor();
     init(serveraddr: string, queueaddr: string, cache: RedisClient): void;
     call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void;
+    callAsync(fun: string, permissions: Permission[], name: string, description: string, impl: AsyncServerFunction): void;
 }
 export interface ProcessorContext {
     db: PGClient;
@@ -71,17 +75,21 @@ export interface ProcessorContext {
 export interface ProcessorFunction {
     (ctx: ProcessorContext, ...args: any[]): void;
 }
+export interface AsyncProcessorFunction {
+    (ctx: ProcessorContext, ...args: any[]): Promise<any>;
+}
 export declare class Processor {
     queueaddr: string;
     sock: Socket;
     pub: Socket;
-    functions: Map<string, ProcessorFunction>;
+    functions: Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>;
     subqueueaddr: string;
     subprocessors: Processor[];
     constructor(subqueueaddr?: string);
     init(queueaddr: string, pool: Pool, cache: RedisClient): void;
     registerSubProcessor(processor: Processor): void;
     call(cmd: string, impl: ProcessorFunction): void;
+    callAsync(cmd: string, impl: AsyncProcessorFunction): void;
 }
 export interface Config {
     serveraddr: string;

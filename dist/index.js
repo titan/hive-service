@@ -1,4 +1,12 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : new P(function (resolve) { resolve(result.value); }).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments)).next());
+    });
+};
 const msgpack = require("msgpack-lite");
 const crypto = require("crypto");
 const nanomsg_1 = require("nanomsg");
@@ -8,6 +16,41 @@ const bluebird = require("bluebird");
 const zlib = require("zlib");
 const pg_1 = require("pg");
 const redis_1 = require("redis");
+const zlib_deflate = bluebird.promisify(zlib.deflate);
+const zlib_inflate = bluebird.promisify(zlib.inflate);
+function server_msgpack(sn, obj, callback) {
+    const payload = msgpack.encode(obj);
+    if (payload.length > 1024) {
+        zlib.deflate(payload, (e, newbuf) => {
+            if (e) {
+                callback(msgpack.encode({ sn, payload }));
+            }
+            else {
+                callback(msgpack.encode({ sn, payload: newbuf }));
+            }
+        });
+    }
+    else {
+        callback(msgpack.encode({ sn, payload }));
+    }
+}
+function server_msgpack_async(sn, obj) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const payload = yield msgpack_encode(obj);
+        if (payload.length > 1024) {
+            try {
+                const newbuf = yield zlib_deflate(payload);
+                return msgpack_encode({ sn, payload: newbuf });
+            }
+            catch (e1) {
+                return msgpack_encode({ sn, payload });
+            }
+        }
+        else {
+            return msgpack_encode({ sn, payload });
+        }
+    });
+}
 class Server {
     constructor() {
         this.functions = new Map();
@@ -43,44 +86,49 @@ class Server {
                 const fun = pkt.fun;
                 const args = pkt.args;
                 if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
-                    const func = _self.functions.get(fun);
+                    const [asynced, impl] = _self.functions.get(fun);
+                    ctx.publish = (pkt) => _self.pub.send(msgpack.encode(pkt));
                     if (args != null) {
-                        ctx.publish = (pkt) => _self.pub.send(msgpack.encode(pkt));
-                        func(ctx, function (result) {
-                            const payload = msgpack.encode(result);
-                            if (payload.length > 1024) {
-                                zlib.deflate(payload, (e, newbuf) => {
-                                    if (e) {
-                                        sock.send(msgpack.encode({ sn, payload }));
-                                    }
-                                    else {
-                                        sock.send(msgpack.encode({ sn, payload: newbuf }));
-                                    }
+                        if (!asynced) {
+                            const func = impl;
+                            func(ctx, function (result) {
+                                server_msgpack(sn, result, (buf) => { sock.send(buf); });
+                            }, ...args);
+                        }
+                        else {
+                            const func = impl;
+                            (() => __awaiter(this, void 0, void 0, function* () {
+                                const result = yield func(ctx, ...args);
+                                const pkt = yield server_msgpack_async(sn, result);
+                                sock.send(pkt);
+                            }))().catch(e => {
+                                const payload = msgpack.encode({ code: 500, msg: e.message });
+                                msgpack_encode({ sn, payload }).then(pkt => {
+                                    sock.send(pkt);
                                 });
-                            }
-                            else {
-                                sock.send(msgpack.encode({ sn, payload }));
-                            }
-                        }, ...args);
+                            });
+                        }
                     }
                     else {
-                        ctx.publish = (pkt) => _self.pub.send(msgpack.encode(pkt));
-                        func(ctx, function (result) {
-                            const payload = msgpack.encode(result);
-                            if (payload.length > 1024) {
-                                zlib.deflate(payload, (e, newbuf) => {
-                                    if (e) {
-                                        sock.send(msgpack.encode({ sn, payload }));
-                                    }
-                                    else {
-                                        sock.send(msgpack.encode({ sn, payload: newbuf }));
-                                    }
+                        if (!asynced) {
+                            const func = impl;
+                            func(ctx, function (result) {
+                                server_msgpack(sn, result, sock.send);
+                            });
+                        }
+                        else {
+                            const func = impl;
+                            (() => __awaiter(this, void 0, void 0, function* () {
+                                const result = yield func(ctx);
+                                const pkt = yield server_msgpack_async(sn, result);
+                                sock.send(pkt);
+                            }))().catch(e => {
+                                const payload = msgpack.encode({ code: 500, msg: e.message });
+                                msgpack_encode({ sn, payload }).then(pkt => {
+                                    sock.send(pkt);
                                 });
-                            }
-                            else {
-                                sock.send(msgpack.encode({ sn, payload }));
-                            }
-                        });
+                            });
+                        }
                     }
                 }
                 else {
@@ -91,7 +139,11 @@ class Server {
         }
     }
     call(fun, permissions, name, description, impl) {
-        this.functions.set(fun, impl);
+        this.functions.set(fun, [false, impl]);
+        this.permissions.set(fun, new Map(permissions));
+    }
+    callAsync(fun, permissions, name, description, impl) {
+        this.functions.set(fun, [true, impl]);
         this.permissions.set(fun, new Map(permissions));
     }
 }
@@ -123,23 +175,49 @@ class Processor {
         this.sock.on("data", (buf) => {
             const pkt = msgpack.decode(buf);
             if (_self.functions.has(pkt.cmd)) {
-                pool.connect().then(db => {
-                    const func = _self.functions.get(pkt.cmd);
-                    let ctx = {
-                        db,
-                        cache,
-                        done: () => { db.release(); },
-                        publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
-                    };
-                    if (pkt.args) {
-                        func(ctx, ...pkt.args);
-                    }
-                    else {
-                        func(ctx);
-                    }
-                }).catch(e => {
-                    console.log("DB connection error " + e.stack);
-                });
+                const [asynced, func] = _self.functions.get(pkt.cmd);
+                if (!asynced) {
+                    pool.connect().then(db => {
+                        const ctx = {
+                            db,
+                            cache,
+                            done: () => { db.release(); },
+                            publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+                        };
+                        if (pkt.args) {
+                            func(ctx, ...pkt.args);
+                        }
+                        else {
+                            func(ctx);
+                        }
+                    }).catch(e => {
+                        console.log("DB connection error " + e.stack);
+                    });
+                }
+                else {
+                    (() => __awaiter(this, void 0, void 0, function* () {
+                        const db = yield pool.connect();
+                        const ctx = {
+                            db,
+                            cache,
+                            done: () => { },
+                            publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+                        };
+                        try {
+                            if (pkt.args) {
+                                yield func(ctx, ...pkt.args);
+                            }
+                            else {
+                                yield func(ctx);
+                            }
+                        }
+                        finally {
+                            db.release();
+                        }
+                    }))().catch(e => {
+                        console.log("error " + e.stack);
+                    });
+                }
             }
             else {
                 console.error(pkt.cmd + " not found!");
@@ -150,7 +228,10 @@ class Processor {
         this.subprocessors.push(processor);
     }
     call(cmd, impl) {
-        this.functions.set(cmd, impl);
+        this.functions.set(cmd, [false, impl]);
+    }
+    callAsync(cmd, impl) {
+        this.functions.set(cmd, [true, impl]);
     }
 }
 exports.Processor = Processor;

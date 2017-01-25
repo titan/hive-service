@@ -85,7 +85,8 @@ class Server {
                     ip: undefined,
                     uid: undefined,
                     cache: undefined,
-                    publish: undefined
+                    publish: undefined,
+                    sn,
                 };
                 for (const key in pkt.ctx) {
                     ctx[key] = pkt.ctx[key];
@@ -96,47 +97,28 @@ class Server {
                 if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
                     const [asynced, impl] = _self.functions.get(fun);
                     ctx.publish = (pkt) => _self.pub.send(msgpack.encode(__assign({}, pkt, { sn })));
-                    if (args != null) {
-                        if (!asynced) {
-                            const func = impl;
-                            func(ctx, function (result) {
+                    if (!asynced) {
+                        const func = impl;
+                        args ?
+                            func(ctx, (result) => {
                                 server_msgpack(sn, result, (buf) => { sock.send(buf); });
-                            }, ...args);
-                        }
-                        else {
-                            const func = impl;
-                            (() => __awaiter(this, void 0, void 0, function* () {
-                                const result = yield func(ctx, ...args);
-                                const pkt = yield server_msgpack_async(sn, result);
-                                sock.send(pkt);
-                            }))().catch(e => {
-                                const payload = msgpack.encode({ code: 500, msg: e.message });
-                                msgpack_encode({ sn, payload }).then(pkt => {
-                                    sock.send(pkt);
-                                });
+                            }, ...args) :
+                            func(ctx, (result) => {
+                                server_msgpack(sn, result, (buf) => { sock.send(buf); });
                             });
-                        }
                     }
                     else {
-                        if (!asynced) {
-                            const func = impl;
-                            func(ctx, function (result) {
-                                server_msgpack(sn, result, sock.send);
-                            });
-                        }
-                        else {
-                            const func = impl;
-                            (() => __awaiter(this, void 0, void 0, function* () {
-                                const result = yield func(ctx);
-                                const pkt = yield server_msgpack_async(sn, result);
+                        const func = impl;
+                        (() => __awaiter(this, void 0, void 0, function* () {
+                            const result = args ? yield func(ctx, ...args) : yield func(ctx);
+                            const pkt = yield server_msgpack_async(sn, result);
+                            sock.send(pkt);
+                        }))().catch(e => {
+                            const payload = msgpack.encode({ code: 500, msg: e.message });
+                            msgpack_encode({ sn, payload }).then(pkt => {
                                 sock.send(pkt);
-                            }))().catch(e => {
-                                const payload = msgpack.encode({ code: 500, msg: e.message });
-                                msgpack_encode({ sn, payload }).then(pkt => {
-                                    sock.send(pkt);
-                                });
                             });
-                        }
+                        });
                     }
                 }
                 else {
@@ -193,11 +175,23 @@ class Processor {
                             publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
                         };
                         try {
+                            let result = undefined;
                             if (pkt.args) {
-                                func(ctx, ...pkt.args);
+                                result = func(ctx, ...pkt.args);
                             }
                             else {
-                                func(ctx);
+                                result = func(ctx);
+                            }
+                            if (result !== undefined) {
+                                msgpack_encode(result).then(buf => {
+                                    cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                        if (e) {
+                                            console.log("Error " + e.stack);
+                                        }
+                                    });
+                                }).catch(e => {
+                                    console.log("Error " + e.stack);
+                                });
                             }
                         }
                         catch (e) {
@@ -220,11 +214,23 @@ class Processor {
                             publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
                         };
                         try {
+                            let result = undefined;
                             if (pkt.args) {
-                                yield func(ctx, ...pkt.args);
+                                result = yield func(ctx, ...pkt.args);
                             }
                             else {
-                                yield func(ctx);
+                                result = yield func(ctx);
+                            }
+                            if (result !== undefined) {
+                                msgpack_encode(result).then(buf => {
+                                    cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                        if (e) {
+                                            console.log("Error " + e.stack);
+                                        }
+                                    });
+                                }).catch(e => {
+                                    console.log("Error " + e.stack);
+                                });
                             }
                         }
                         finally {
@@ -328,6 +334,10 @@ function timer_callback(cache, reply, rep, retry, countdown) {
         }
     });
 }
+function waiting(ctx, rep, retry = 7) {
+    setTimeout(timer_callback, 100, ctx.cache, `results:${ctx.sn}`, rep, retry + 1, retry);
+}
+exports.waiting = waiting;
 function wait_for_response(cache, reply, rep, retry = 7) {
     setTimeout(timer_callback, 500, cache, reply, rep, retry + 1, retry);
 }

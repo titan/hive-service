@@ -48,6 +48,7 @@ export interface ServerContext {
     uid: string;
     cache: RedisClient;
     publish: ((pkg: CmdPacket) => void);
+    sn?: string;
 }
 export interface ServerFunction {
     (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
@@ -114,6 +115,7 @@ export declare class Service {
 }
 export declare function fib(n: number): number;
 export declare function fiball(n: number): number;
+export declare function waiting(ctx: ServerContext, rep: ((result: any) => void), retry?: number): void;
 export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry?: number): void;
 export declare function set_for_response(cache: RedisClient, key: string, value: any, timeout?: number): Promise<any>;
 export declare function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T>;

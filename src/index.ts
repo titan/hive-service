@@ -59,6 +59,7 @@ export interface ServerContext {
   uid: string;
   cache: RedisClient;
   publish: ((pkg: CmdPacket) => void);
+  sn?: string;
 }
 
 export interface ServerFunction {
@@ -135,7 +136,8 @@ export class Server {
           ip: undefined,
           uid: undefined,
           cache: undefined,
-          publish: undefined
+          publish: undefined,
+          sn,
         };
         for (const key in pkt.ctx /* Domain, IP, User */) {
           ctx[key] = pkt.ctx[key];
@@ -146,44 +148,27 @@ export class Server {
         if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
           const [asynced, impl] = _self.functions.get(fun);
           ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode({...pkt, sn}));
-          if (args != null) {
-            if (!asynced) {
-              const func = impl as ServerFunction;
-              func(ctx, function(result) {
-                server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
-              }, ...args);
-            } else {
-              const func = impl as AsyncServerFunction;
-              (async () => {
-                const result: any = await func(ctx, ...args);
-                const pkt = await server_msgpack_async(sn, result);
-                sock.send(pkt);
-              })().catch(e => {
-                const payload = msgpack.encode({ code: 500, msg: e.message });
-                msgpack_encode({ sn, payload }).then(pkt => {
-                  sock.send(pkt);
-                });
-              });
-            }
+          if (!asynced) {
+            const func = impl as ServerFunction;
+            args ?
+            func(ctx, (result: any) => {
+              server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
+            }, ...args) :
+            func(ctx, (result: any) => {
+              server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
+            });
           } else {
-            if (!asynced) {
-              const func = impl as ServerFunction;
-              func(ctx, function(result) {
-                server_msgpack(sn, result, sock.send);
+            const func = impl as AsyncServerFunction;
+            (async () => {
+              const result: any = args ? await func(ctx, ...args) : await func(ctx);
+              const pkt = await server_msgpack_async(sn, result);
+              sock.send(pkt);
+            })().catch(e => {
+              const payload = msgpack.encode({ code: 500, msg: e.message });
+              msgpack_encode({ sn, payload }).then(pkt => {
+                sock.send(pkt);
               });
-            } else {
-              const func = impl as AsyncServerFunction;
-              (async () => {
-                  const result: any = await func(ctx);
-                  const pkt = await server_msgpack_async(sn, result);
-                  sock.send(pkt);
-              })().catch(e => {
-                const payload = msgpack.encode({ code: 500, msg: e.message });
-                msgpack_encode({ sn, payload }).then(pkt => {
-                  sock.send(pkt);
-                });
-              });
-            }
+            });
           }
         } else {
           const payload = msgpack.encode({ code: 403, msg: "Forbidden" });
@@ -264,10 +249,22 @@ export class Processor {
               publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
             };
             try {
+              let result = undefined;
               if (pkt.args) {
-                func(ctx, ...pkt.args);
+                result = func(ctx, ...pkt.args);
               } else {
-                func(ctx);
+                result = func(ctx);
+              }
+              if (result !== undefined) {
+                msgpack_encode(result).then(buf => {
+                  cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                    if (e) {
+                      console.log("Error " + e.stack);
+                    }
+                  });
+                }).catch(e => {
+                  console.log("Error " + e.stack);
+                });
               }
             } catch (e) {
               console.log("Error " + e.stack);
@@ -287,10 +284,22 @@ export class Processor {
               publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
             };
             try {
+              let result = undefined;
               if (pkt.args) {
-                await func(ctx, ...pkt.args);
+                result = await func(ctx, ...pkt.args);
               } else {
-                await func(ctx);
+                result = await func(ctx);
+              }
+              if (result !== undefined) {
+                msgpack_encode(result).then(buf => {
+                  cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                    if (e) {
+                      console.log("Error " + e.stack);
+                    }
+                  });
+                }).catch(e => {
+                  console.log("Error " + e.stack);
+                });
               }
             } finally {
               db.release();
@@ -415,6 +424,10 @@ function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) =
       setTimeout(timer_callback, fib(retry - countdown) * 1000, cache, reply, rep, retry, countdown - 1);
     }
   });
+}
+
+export function waiting(ctx: ServerContext, rep: ((result: any) => void), retry: number = 7) {
+  setTimeout(timer_callback, 100, ctx.cache, `results:${ctx.sn}`, rep, retry + 1, retry);
 }
 
 export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry: number = 7) {

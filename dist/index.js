@@ -171,27 +171,27 @@ class Processor {
                         const ctx = {
                             db,
                             cache,
-                            done: () => { },
+                            done: (result) => {
+                                if (result !== undefined) {
+                                    msgpack_encode(result).then(buf => {
+                                        cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                            if (e) {
+                                                console.log("Error " + e.stack);
+                                            }
+                                        });
+                                    }).catch(e => {
+                                        console.log("Error " + e.stack);
+                                    });
+                                }
+                            },
                             publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
                         };
                         try {
-                            let result = undefined;
                             if (pkt.args) {
-                                result = func(ctx, ...pkt.args);
+                                func(ctx, ...pkt.args);
                             }
                             else {
-                                result = func(ctx);
-                            }
-                            if (result !== undefined) {
-                                msgpack_encode(result).then(buf => {
-                                    cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
-                                        if (e) {
-                                            console.log("Error " + e.stack);
-                                        }
-                                    });
-                                }).catch(e => {
-                                    console.log("Error " + e.stack);
-                                });
+                                func(ctx);
                             }
                         }
                         catch (e) {

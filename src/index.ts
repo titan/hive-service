@@ -8,9 +8,6 @@ import * as zlib from "zlib";
 import { Pool, Client as PGClient } from "pg";
 import { createClient, RedisClient, Multi } from "redis";
 
-const zlib_deflate = bluebird.promisify(zlib.deflate);
-const zlib_inflate = bluebird.promisify(zlib.inflate);
-
 declare module "redis" {
   export interface RedisClient extends NodeJS.EventEmitter {
     decrAsync(key: string): Promise<any>;
@@ -68,6 +65,18 @@ export interface ServerFunction {
 
 export interface AsyncServerFunction {
   (ctx: ServerContext, ...reset: any[]): Promise<any>;
+}
+
+function zlib_deflate(payload: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    zlib.deflate(payload, (e: Error, newbuf: Buffer) => {
+      if (e) {
+        reject(e);
+      } else {
+        resolve(newbuf);
+      }
+    });
+  });
 }
 
 function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void)) {

@@ -24,8 +24,18 @@ const bluebird = require("bluebird");
 const zlib = require("zlib");
 const pg_1 = require("pg");
 const redis_1 = require("redis");
-const zlib_deflate = bluebird.promisify(zlib.deflate);
-const zlib_inflate = bluebird.promisify(zlib.inflate);
+function zlib_deflate(payload) {
+    return new Promise((resolve, reject) => {
+        zlib.deflate(payload, (e, newbuf) => {
+            if (e) {
+                reject(e);
+            }
+            else {
+                resolve(newbuf);
+            }
+        });
+    });
+}
 function server_msgpack(sn, obj, callback) {
     const payload = msgpack.encode(obj);
     if (payload.length > 1024) {

@@ -201,7 +201,7 @@ export class Server {
 export interface ProcessorContext {
   db: PGClient;
   cache: RedisClient;
-  done: ((result: any) => void);
+  done: ((result?: any) => void);
   publish: ((pkg: CmdPacket) => void);
 }
 

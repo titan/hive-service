@@ -99,12 +99,12 @@ async function server_msgpack_async(sn: string, obj: any) {
   if (payload.length > 1024) {
     try {
       const newbuf = await zlib_deflate(payload);
-      return msgpack_encode({ sn, payload: newbuf });
+      return Promise.resolve(msgpack.encode({ sn, payload: newbuf }));
     } catch (e1) {
-      return msgpack_encode({ sn, payload });
+      return Promise.resolve(msgpack.encode({ sn, payload }));
     }
   } else {
-    return msgpack_encode({ sn, payload });
+    return Promise.resolve(msgpack.encode({ sn, payload }));
   }
 }
 
@@ -168,11 +168,11 @@ export class Server {
             });
           } else {
             const func = impl as AsyncServerFunction;
-            (async () => {
+            (async (sock) => {
               const result: any = args ? await func(ctx, ...args) : await func(ctx);
               const pkt = await server_msgpack_async(sn, result);
               sock.send(pkt);
-            })().catch(e => {
+            })(sock).catch(e => {
               const payload = msgpack.encode({ code: 500, msg: e.message });
               msgpack_encode({ sn, payload }).then(pkt => {
                 sock.send(pkt);

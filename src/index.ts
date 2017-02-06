@@ -254,7 +254,7 @@ export class Processor {
             const ctx: ProcessorContext = {
               db,
               cache,
-              done: (result: any) => {
+              done: (result?: any) => {
                 if (result !== undefined) {
                   msgpack_encode(result).then(buf => {
                     cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {

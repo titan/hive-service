@@ -118,6 +118,7 @@ export declare function fiball(n: number): number;
 export declare function waiting(ctx: ServerContext, rep: ((result: any) => void), retry?: number): void;
 export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry?: number): void;
 export declare function set_for_response(cache: RedisClient, key: string, value: any, timeout?: number): Promise<any>;
+export declare function waitingAsync(ctx: ServerContext, retry?: number): Promise<any>;
 export declare function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T>;
 export interface Paging<T> {
     count: number;

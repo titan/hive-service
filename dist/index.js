@@ -369,6 +369,32 @@ function set_for_response(cache, key, value, timeout = 30) {
     });
 }
 exports.set_for_response = set_for_response;
+function async_timer_callback(cache, reply, resolve, reject, retry, countdown) {
+    cache.get(reply, (err, result) => {
+        if (result) {
+            msgpack_decode(result).then(obj => {
+                resolve(obj);
+            }).catch((e) => {
+                reject(e);
+            });
+        }
+        else if (countdown === 0) {
+            const e = new Error();
+            e.name = "504";
+            e.message = "Request Timeout";
+            reject(e);
+        }
+        else {
+            setTimeout(timer_callback, fib(retry - countdown) * 1000, cache, reply, resolve, reject, retry, countdown - 1);
+        }
+    });
+}
+function waitingAsync(ctx, retry = 7) {
+    return new Promise((resolve, reject) => {
+        setTimeout(async_timer_callback, 100, ctx.cache, `results:${ctx.sn}`, resolve, reject, retry + 1, retry);
+    });
+}
+exports.waitingAsync = waitingAsync;
 function rpc(domain, addr, uid, fun, ...args) {
     const p = new Promise(function (resolve, reject) {
         let a = [];

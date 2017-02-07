@@ -459,6 +459,31 @@ export function set_for_response(cache: RedisClient, key: string, value: any, ti
   });
 }
 
+function async_timer_callback(cache: RedisClient, reply: string, resolve, reject, retry: number, countdown: number) {
+  cache.get(reply, (err: Error, result: Buffer) => {
+    if (result) {
+      msgpack_decode<any>(result).then(obj => {
+        resolve(obj);
+      }).catch((e: Error) => {
+        reject(e);
+      });
+    } else if (countdown === 0) {
+      const e = new Error();
+      e.name = "504";
+      e.message = "Request Timeout";
+      reject(e);
+    } else {
+      setTimeout(timer_callback, fib(retry - countdown) * 1000, cache, reply, resolve, reject, retry, countdown - 1);
+    }
+  });
+}
+
+export function waitingAsync(ctx: ServerContext, retry: number = 7): Promise<any> {
+  return new Promise<any>((resolve, reject) => {
+    setTimeout(async_timer_callback, 100, ctx.cache, `results:${ctx.sn}`, resolve, reject, retry + 1, retry);
+  });
+}
+
 export function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T> {
   const p = new Promise<T>(function (resolve, reject) {
     let a = [];

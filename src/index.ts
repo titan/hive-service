@@ -11,6 +11,7 @@ import { createClient, RedisClient, Multi } from "redis";
 declare module "redis" {
   export interface RedisClient extends NodeJS.EventEmitter {
     decrAsync(key: string): Promise<any>;
+    decrbyAsync(key: string, decrement: number): Promise<any>;
     delAsync(key: string): Promise<any>;
     hdelAsync(key: string, field: string): Promise<any>;
     hgetAsync(key: string, field: string): Promise<any>;
@@ -20,6 +21,7 @@ declare module "redis" {
     hsetAsync(key: string, field: string, value: string | Buffer): Promise<any>;
     hvalsAsync(key: string): Promise<any>;
     incrAsync(key: string): Promise<any>;
+    incrbyAsync(key: string, increment: number): Promise<any>;
     lindexAsync(key: string, index: number): Promise<any>;
     lpopAsync(key: string): Promise<any>;
     lpushAsync(key: string, value: string | number | Buffer): Promise<any>;

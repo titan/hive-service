@@ -198,6 +198,15 @@ class Processor {
                         }).catch(e => {
                             db.release();
                             console.log("Error " + e.stack);
+                            msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+                                cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                    if (e) {
+                                        console.log("Error " + e.stack);
+                                    }
+                                });
+                            }).catch(e => {
+                                console.log("Error " + e.stack);
+                            });
                         });
                     }
                 }).catch(e => {

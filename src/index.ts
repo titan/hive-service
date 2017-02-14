@@ -234,57 +234,12 @@ export class Processor {
     this.sock.on("data", (buf: NodeBuffer) => {
       const pkt: CmdPacket = msgpack.decode(buf);
       if (_self.functions.has(pkt.cmd)) {
-        const [asynced, func] = _self.functions.get(pkt.cmd);
-        if (!asynced) {
-          pool.connect().then(db => {
-            const ctx: ProcessorContext = {
-              db,
-              cache,
-              done: (result?: any) => {
-                if (result !== undefined) {
-                  msgpack_encode(result).then(buf => {
-                    cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
-                      if (e) {
-                        console.log("Error " + e.stack);
-                      }
-                    });
-                  }).catch(e => {
-                    console.log("Error " + e.stack);
-                  });
-                }
-              },
-              publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
-            };
-            try {
-              if (pkt.args) {
-                func(ctx, ...pkt.args);
-              } else {
-                func(ctx);
-              }
-            } catch (e) {
-              console.log("Error " + e.stack);
-            } finally {
-              db.release();
-            }
-          }).catch(e => {
-            console.log("DB connection error " + e.stack);
-          });
-        } else {
-          (async () => {
-            const db = await pool.connect();
-            const ctx: ProcessorContext = {
-              db,
-              cache,
-              done: () => {},
-              publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
-            };
-            try {
-              let result = undefined;
-              if (pkt.args) {
-                result = await func(ctx, ...pkt.args);
-              } else {
-                result = await func(ctx);
-              }
+        const [asynced, impl] = _self.functions.get(pkt.cmd);
+        pool.connect().then(db => {
+          const ctx: ProcessorContext = {
+            db,
+            cache,
+            done: !asynced ? (result?: any) => {
               if (result !== undefined) {
                 msgpack_encode(result).then(buf => {
                   cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
@@ -296,13 +251,41 @@ export class Processor {
                   console.log("Error " + e.stack);
                 });
               }
+            } : undefined,
+            publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined
+          };
+          if (!asynced) {
+            const func = impl as ProcessorFunction;
+            try {
+              func(ctx, ...pkt.args);
+            } catch (e) {
+              console.log("Error " + e.stack);
             } finally {
               db.release();
             }
-          })().catch(e => {
-              console.log("error " + e.stack);
-          });
-        }
+          } else {
+            const func = impl as AsyncProcessorFunction;
+            func(ctx, ...pkt.args).then(result => {
+              db.release();
+              if (result !== undefined) {
+                msgpack_encode(result).then(buf => {
+                  cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                    if (e) {
+                      console.log("Error " + e.stack);
+                    }
+                  });
+                }).catch(e => {
+                  console.log("Error " + e.stack);
+                });
+              }
+            }).catch(e => {
+              db.release();
+              console.log("Error " + e.stack);
+            });
+          }
+        }).catch(e => {
+          console.log("DB connection error " + e.stack);
+        });
       } else {
         console.error(pkt.cmd + " not found!");
       }

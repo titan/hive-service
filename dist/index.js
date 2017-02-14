@@ -7,14 +7,6 @@ var __assign = (this && this.__assign) || Object.assign || function(t) {
     }
     return t;
 };
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : new P(function (resolve) { resolve(result.value); }).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments)).next());
-    });
-};
 const msgpack = require("msgpack-lite");
 const crypto = require("crypto");
 const nanomsg_1 = require("nanomsg");
@@ -156,62 +148,12 @@ class Processor {
         this.sock.on("data", (buf) => {
             const pkt = msgpack.decode(buf);
             if (_self.functions.has(pkt.cmd)) {
-                const [asynced, func] = _self.functions.get(pkt.cmd);
-                if (!asynced) {
-                    pool.connect().then(db => {
-                        const ctx = {
-                            db,
-                            cache,
-                            done: (result) => {
-                                if (result !== undefined) {
-                                    msgpack_encode(result).then(buf => {
-                                        cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
-                                            if (e) {
-                                                console.log("Error " + e.stack);
-                                            }
-                                        });
-                                    }).catch(e => {
-                                        console.log("Error " + e.stack);
-                                    });
-                                }
-                            },
-                            publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
-                        };
-                        try {
-                            if (pkt.args) {
-                                func(ctx, ...pkt.args);
-                            }
-                            else {
-                                func(ctx);
-                            }
-                        }
-                        catch (e) {
-                            console.log("Error " + e.stack);
-                        }
-                        finally {
-                            db.release();
-                        }
-                    }).catch(e => {
-                        console.log("DB connection error " + e.stack);
-                    });
-                }
-                else {
-                    (() => __awaiter(this, void 0, void 0, function* () {
-                        const db = yield pool.connect();
-                        const ctx = {
-                            db,
-                            cache,
-                            done: () => { },
-                            publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
-                        };
-                        try {
-                            let result = undefined;
-                            if (pkt.args) {
-                                result = yield func(ctx, ...pkt.args);
-                            }
-                            else {
-                                result = yield func(ctx);
-                            }
+                const [asynced, impl] = _self.functions.get(pkt.cmd);
+                pool.connect().then(db => {
+                    const ctx = {
+                        db,
+                        cache,
+                        done: !asynced ? (result) => {
                             if (result !== undefined) {
                                 msgpack_encode(result).then(buf => {
                                     cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
@@ -223,14 +165,44 @@ class Processor {
                                     console.log("Error " + e.stack);
                                 });
                             }
+                        } : undefined,
+                        publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined
+                    };
+                    if (!asynced) {
+                        const func = impl;
+                        try {
+                            func(ctx, ...pkt.args);
+                        }
+                        catch (e) {
+                            console.log("Error " + e.stack);
                         }
                         finally {
                             db.release();
                         }
-                    }))().catch(e => {
-                        console.log("error " + e.stack);
-                    });
-                }
+                    }
+                    else {
+                        const func = impl;
+                        func(ctx, ...pkt.args).then(result => {
+                            db.release();
+                            if (result !== undefined) {
+                                msgpack_encode(result).then(buf => {
+                                    cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                        if (e) {
+                                            console.log("Error " + e.stack);
+                                        }
+                                    });
+                                }).catch(e => {
+                                    console.log("Error " + e.stack);
+                                });
+                            }
+                        }).catch(e => {
+                            db.release();
+                            console.log("Error " + e.stack);
+                        });
+                    }
+                }).catch(e => {
+                    console.log("DB connection error " + e.stack);
+                });
             }
             else {
                 console.error(pkt.cmd + " not found!");

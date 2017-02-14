@@ -52,23 +52,6 @@ function server_msgpack(sn, obj, callback) {
         callback(msgpack.encode({ sn, payload }));
     }
 }
-function server_msgpack_async(sn, obj) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const payload = yield Promise.resolve(msgpack.encode(obj));
-        if (payload.length > 1024) {
-            try {
-                const newbuf = yield zlib_deflate(payload);
-                return Promise.resolve(msgpack.encode({ sn, payload: newbuf }));
-            }
-            catch (e1) {
-                return Promise.resolve(msgpack.encode({ sn, payload }));
-            }
-        }
-        else {
-            return Promise.resolve(msgpack.encode({ sn, payload }));
-        }
-    });
-}
 class Server {
     constructor() {
         this.functions = new Map();
@@ -119,11 +102,9 @@ class Server {
                     }
                     else {
                         const func = impl;
-                        ((sock) => __awaiter(this, void 0, void 0, function* () {
-                            const result = args ? yield func(ctx, ...args) : yield func(ctx);
-                            const pkt = yield server_msgpack_async(sn, result);
-                            sock.send(pkt);
-                        }))(sock).catch(e => {
+                        func(ctx, ...args).then(result => {
+                            server_msgpack(sn, result, (buf) => { sock.send(buf); });
+                        }).catch(e => {
                             const payload = msgpack.encode({ code: 500, msg: e.message });
                             msgpack_encode({ sn, payload }).then(pkt => {
                                 sock.send(pkt);

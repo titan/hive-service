@@ -96,20 +96,6 @@ function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void))
   }
 }
 
-async function server_msgpack_async(sn: string, obj: any) {
-  const payload = await Promise.resolve(msgpack.encode(obj));
-  if (payload.length > 1024) {
-    try {
-      const newbuf = await zlib_deflate(payload);
-      return Promise.resolve(msgpack.encode({ sn, payload: newbuf }));
-    } catch (e1) {
-      return Promise.resolve(msgpack.encode({ sn, payload }));
-    }
-  } else {
-    return Promise.resolve(msgpack.encode({ sn, payload }));
-  }
-}
-
 export class Server {
   queueaddr: string;
   rep: Socket;
@@ -170,11 +156,9 @@ export class Server {
             });
           } else {
             const func = impl as AsyncServerFunction;
-            (async (sock) => {
-              const result: any = args ? await func(ctx, ...args) : await func(ctx);
-              const pkt = await server_msgpack_async(sn, result);
-              sock.send(pkt);
-            })(sock).catch(e => {
+            func(ctx, ...args).then(result => {
+              server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
+            }).catch(e => {
               const payload = msgpack.encode({ code: 500, msg: e.message });
               msgpack_encode({ sn, payload }).then(pkt => {
                 sock.send(pkt);

@@ -13,6 +13,7 @@ declare module "redis" {
     decrAsync(key: string): Promise<any>;
     decrbyAsync(key: string, decrement: number): Promise<any>;
     delAsync(key: string): Promise<any>;
+    getAsync(key: string): Promise<any>;
     hdelAsync(key: string, field: string): Promise<any>;
     hgetAsync(key: string, field: string): Promise<any>;
     hgetallAsync(key: string): Promise<any>;

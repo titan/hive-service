@@ -331,6 +331,107 @@ export class Processor {
   }
 }
 
+export interface BusinessEventPacket {
+  sn: string;
+  data: any;
+}
+
+export interface BusinessEventContext {
+  pool: Pool;
+  cache: RedisClient;
+  queue: Disq;
+  queuename: string;
+  handler: BusinessEventHandlerFunction;
+  db?: PGClient;
+}
+
+export interface BusinessEventHandlerFunction {
+  (ctx: BusinessEventContext, data: any): Promise<any>;
+}
+
+function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
+  const options = {
+    timeout: 10,
+    count: 1,
+  };
+  ctx.queue.getjob(ctx.queuename, options).then(job => {
+    if (job) {
+      const body = job.body as Buffer;
+      msgpack_decode(body).then((pkt: BusinessEventPacket) => {
+        ctx.pool.connect().then(db => {
+          ctx.db = db;
+          ctx.handler(ctx, pkt.data).then(result => {
+            db.release();
+            if (result !== undefined) {
+              msgpack_encode(result).then(buf => {
+                ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                  if (e) {
+                    console.log("Error " + e.stack);
+                  }
+                  ctx.queue.ackjob(job.id);
+                  setTimeout(on_event_timer, 0, ctx);
+                });
+              }).catch(e => {
+                console.log("Error " + e.stack);
+                ctx.queue.ackjob(job.id);
+                setTimeout(on_event_timer, 0, ctx);
+              });
+            }
+          }).catch(e => {
+            db.release();
+            msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+              ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                if (e) {
+                  console.log("Error " + e.stack);
+                }
+                setTimeout(on_event_timer, 1000, ctx);
+              });
+            }).catch(e => {
+              console.log("Error " + e.stack);
+              setTimeout(on_event_timer, 1000, ctx);
+            });
+          });
+        }).catch(e => {
+          console.log("DB connection error " + e.stack);
+          setTimeout(on_event_timer, 1000, ctx);
+        });
+      }).catch(e => {
+        console.log("Invalid event packet" + e.stack);
+        ctx.queue.ackjob(job.id);
+        setTimeout(on_event_timer, 1000, ctx);
+      });
+    } else {
+      setTimeout(on_event_timer, 1000, ctx);
+    }
+  }).catch(e => {
+    setTimeout(on_event_timer, 1000, ctx);
+  });
+}
+
+export class BusinessEventListener {
+  queuename: string;
+  handler: BusinessEventHandlerFunction;
+  constructor(queuename: string) {
+    this.queuename = queuename;
+  }
+
+  public init(pool: Pool, cache: RedisClient, queue: Disq): void {
+    const ctx: BusinessEventContext = {
+      pool,
+      cache,
+      queue,
+      queuename: this.queuename,
+      handler: this.handler,
+      db: undefined
+    };
+    setTimeout(on_event_timer, 1000, ctx);
+  }
+
+  public onEvent(handler: BusinessEventHandlerFunction) {
+    this.handler = handler;
+  }
+}
+
 export interface Config {
   serveraddr: string;
   queueaddr: string;
@@ -583,96 +684,4 @@ export function msgpack_decode<T>(buf: Buffer): Promise<T> {
       resolve(result);
     }
   });
-}
-
-export interface BusinessEventPacket {
-  sn: string;
-  data: any;
-}
-
-export interface BusinessEventContext {
-  pool: Pool;
-  cache: RedisClient;
-  queue: Disq;
-  queuename: string;
-  db?: PGClient;
-}
-
-function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
-  const options = {
-    timeout: 10,
-    count: 1,
-  };
-  ctx.queue.getjob(ctx.queuename, options).then(job => {
-    if (job) {
-      const body = job.body as Buffer;
-      msgpack_decode(body).then((pkt: BusinessEventPacket) => {
-        ctx.pool.connect().then(db => {
-          ctx.db = db;
-          thiz.onEvent(ctx, pkt.data).then(result => {
-            db.release();
-            if (result !== undefined) {
-              msgpack_encode(result).then(buf => {
-                ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
-                  if (e) {
-                    console.log("Error " + e.stack);
-                  }
-                  ctx.queue.ackjob(job.id);
-                  setTimeout(on_event_timer, 0, thiz, ctx);
-                });
-              }).catch(e => {
-                console.log("Error " + e.stack);
-                ctx.queue.ackjob(job.id);
-                setTimeout(on_event_timer, 0, thiz, ctx);
-              });
-            }
-          }).catch(e => {
-            db.release();
-            msgpack_encode({ code: 500, msg: e.message }).then(buf => {
-              ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
-                if (e) {
-                  console.log("Error " + e.stack);
-                }
-                setTimeout(on_event_timer, 1000, thiz, ctx);
-              });
-            }).catch(e => {
-              console.log("Error " + e.stack);
-              setTimeout(on_event_timer, 1000, thiz, ctx);
-            });
-          });
-        }).catch(e => {
-          console.log("DB connection error " + e.stack);
-          setTimeout(on_event_timer, 1000, thiz, ctx);
-        });
-      }).catch(e => {
-        console.log("Invalid event packet" + e.stack);
-        ctx.queue.ackjob(job.id);
-        setTimeout(on_event_timer, 1000, thiz, ctx);
-      });
-    } else {
-      setTimeout(on_event_timer, 1000, thiz, ctx);
-    }
-  }).catch(e => {
-    setTimeout(on_event_timer, 1000, thiz, ctx);
-  });
-}
-
-export abstract class BusinessEventListener {
-  queuename: string;
-  constructor(protected name: string) {
-    this.queuename = name;
-  }
-
-  public init(pool: Pool, cache: RedisClient, queue: Disq): void {
-    const ctx: BusinessEventContext = {
-      pool,
-      cache,
-      queue,
-      queuename: this.queuename,
-      db: undefined
-    };
-    setTimeout(on_event_timer, 1000, this, ctx);
-  }
-
-  public abstract async onEvent(ctx: BusinessEventContext, data: any) : Promise<any>;
 }

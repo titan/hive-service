@@ -99,6 +99,28 @@ export declare class Processor {
     call(cmd: string, impl: ProcessorFunction): void;
     callAsync(cmd: string, impl: AsyncProcessorFunction): void;
 }
+export interface BusinessEventPacket {
+    sn: string;
+    data: any;
+}
+export interface BusinessEventContext {
+    pool: Pool;
+    cache: RedisClient;
+    queue: Disq;
+    queuename: string;
+    handler: BusinessEventHandlerFunction;
+    db?: PGClient;
+}
+export interface BusinessEventHandlerFunction {
+    (ctx: BusinessEventContext, data: any): Promise<any>;
+}
+export declare class BusinessEventListener {
+    queuename: string;
+    handler: BusinessEventHandlerFunction;
+    constructor(queuename: string);
+    init(pool: Pool, cache: RedisClient, queue: Disq): void;
+    onEvent(handler: BusinessEventHandlerFunction): void;
+}
 export interface Config {
     serveraddr: string;
     queueaddr: string;
@@ -138,21 +160,3 @@ export interface Paging<T> {
 }
 export declare function msgpack_encode(obj: any): Promise<Buffer>;
 export declare function msgpack_decode<T>(buf: Buffer): Promise<T>;
-export interface BusinessEventPacket {
-    sn: string;
-    data: any;
-}
-export interface BusinessEventContext {
-    pool: Pool;
-    cache: RedisClient;
-    queue: Disq;
-    queuename: string;
-    db?: PGClient;
-}
-export declare abstract class BusinessEventListener {
-    protected name: string;
-    queuename: string;
-    constructor(name: string);
-    init(pool: Pool, cache: RedisClient, queue: Disq): void;
-    abstract onEvent(ctx: BusinessEventContext, data: any): Promise<any>;
-}

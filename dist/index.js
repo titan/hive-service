@@ -243,6 +243,85 @@ class Processor {
     }
 }
 exports.Processor = Processor;
+function on_event_timer(thiz, ctx) {
+    const options = {
+        timeout: 10,
+        count: 1,
+    };
+    ctx.queue.getjob(ctx.queuename, options).then(job => {
+        if (job) {
+            const body = job.body;
+            msgpack_decode(body).then((pkt) => {
+                ctx.pool.connect().then(db => {
+                    ctx.db = db;
+                    ctx.handler(ctx, pkt.data).then(result => {
+                        db.release();
+                        if (result !== undefined) {
+                            msgpack_encode(result).then(buf => {
+                                ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                    if (e) {
+                                        console.log("Error " + e.stack);
+                                    }
+                                    ctx.queue.ackjob(job.id);
+                                    setTimeout(on_event_timer, 0, ctx);
+                                });
+                            }).catch(e => {
+                                console.log("Error " + e.stack);
+                                ctx.queue.ackjob(job.id);
+                                setTimeout(on_event_timer, 0, ctx);
+                            });
+                        }
+                    }).catch(e => {
+                        db.release();
+                        msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+                            ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                if (e) {
+                                    console.log("Error " + e.stack);
+                                }
+                                setTimeout(on_event_timer, 1000, ctx);
+                            });
+                        }).catch(e => {
+                            console.log("Error " + e.stack);
+                            setTimeout(on_event_timer, 1000, ctx);
+                        });
+                    });
+                }).catch(e => {
+                    console.log("DB connection error " + e.stack);
+                    setTimeout(on_event_timer, 1000, ctx);
+                });
+            }).catch(e => {
+                console.log("Invalid event packet" + e.stack);
+                ctx.queue.ackjob(job.id);
+                setTimeout(on_event_timer, 1000, ctx);
+            });
+        }
+        else {
+            setTimeout(on_event_timer, 1000, ctx);
+        }
+    }).catch(e => {
+        setTimeout(on_event_timer, 1000, ctx);
+    });
+}
+class BusinessEventListener {
+    constructor(queuename) {
+        this.queuename = queuename;
+    }
+    init(pool, cache, queue) {
+        const ctx = {
+            pool,
+            cache,
+            queue,
+            queuename: this.queuename,
+            handler: this.handler,
+            db: undefined
+        };
+        setTimeout(on_event_timer, 1000, ctx);
+    }
+    onEvent(handler) {
+        this.handler = handler;
+    }
+}
+exports.BusinessEventListener = BusinessEventListener;
 class Service {
     constructor(config) {
         this.config = config;
@@ -472,79 +551,3 @@ function msgpack_decode(buf) {
     });
 }
 exports.msgpack_decode = msgpack_decode;
-function on_event_timer(thiz, ctx) {
-    const options = {
-        timeout: 10,
-        count: 1,
-    };
-    ctx.queue.getjob(ctx.queuename, options).then(job => {
-        if (job) {
-            const body = job.body;
-            msgpack_decode(body).then((pkt) => {
-                ctx.pool.connect().then(db => {
-                    ctx.db = db;
-                    thiz.onEvent(ctx, pkt.data).then(result => {
-                        db.release();
-                        if (result !== undefined) {
-                            msgpack_encode(result).then(buf => {
-                                ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
-                                    if (e) {
-                                        console.log("Error " + e.stack);
-                                    }
-                                    ctx.queue.ackjob(job.id);
-                                    setTimeout(on_event_timer, 0, thiz, ctx);
-                                });
-                            }).catch(e => {
-                                console.log("Error " + e.stack);
-                                ctx.queue.ackjob(job.id);
-                                setTimeout(on_event_timer, 0, thiz, ctx);
-                            });
-                        }
-                    }).catch(e => {
-                        db.release();
-                        msgpack_encode({ code: 500, msg: e.message }).then(buf => {
-                            ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
-                                if (e) {
-                                    console.log("Error " + e.stack);
-                                }
-                                setTimeout(on_event_timer, 1000, thiz, ctx);
-                            });
-                        }).catch(e => {
-                            console.log("Error " + e.stack);
-                            setTimeout(on_event_timer, 1000, thiz, ctx);
-                        });
-                    });
-                }).catch(e => {
-                    console.log("DB connection error " + e.stack);
-                    setTimeout(on_event_timer, 1000, thiz, ctx);
-                });
-            }).catch(e => {
-                console.log("Invalid event packet" + e.stack);
-                ctx.queue.ackjob(job.id);
-                setTimeout(on_event_timer, 1000, thiz, ctx);
-            });
-        }
-        else {
-            setTimeout(on_event_timer, 1000, thiz, ctx);
-        }
-    }).catch(e => {
-        setTimeout(on_event_timer, 1000, thiz, ctx);
-    });
-}
-class BusinessEventListener {
-    constructor(name) {
-        this.name = name;
-        this.queuename = name;
-    }
-    init(pool, cache, queue) {
-        const ctx = {
-            pool,
-            cache,
-            queue,
-            queuename: this.queuename,
-            db: undefined
-        };
-        setTimeout(on_event_timer, 1000, this, ctx);
-    }
-}
-exports.BusinessEventListener = BusinessEventListener;

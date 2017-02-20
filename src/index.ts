@@ -7,6 +7,7 @@ import * as bluebird from "bluebird";
 import * as zlib from "zlib";
 import { Pool, Client as PGClient } from "pg";
 import { createClient, RedisClient, Multi } from "redis";
+import { Disq } from "hive-disque";
 
 declare module "redis" {
   export interface RedisClient extends NodeJS.EventEmitter {
@@ -59,7 +60,8 @@ export interface ServerContext {
   uid: string;
   cache: RedisClient;
   publish: ((pkg: CmdPacket) => void);
-  sn?: string;
+  push: (queuename: string, sn: string, data: any) => void;
+  sn: string;
 }
 
 export interface ServerFunction {
@@ -102,6 +104,7 @@ export class Server {
   rep: Socket;
   pub: Socket;
   pair: Socket;
+  queue: Disq;
 
   functions: Map<string, [boolean, ServerFunction | AsyncServerFunction]>;
   permissions: Map<string, Map<string, boolean>>; // {function => { domain => permission }}
@@ -111,7 +114,7 @@ export class Server {
     this.permissions = new Map<string, Map<string, boolean>>();
   }
 
-  public init(serveraddr: string, queueaddr: string, cache: RedisClient): void {
+  public init(serveraddr: string, queueaddr: string, cache: RedisClient, queue?: Disq): void {
     this.queueaddr = queueaddr;
     this.rep = socket("rep");
     this.rep.bind(serveraddr);
@@ -121,6 +124,7 @@ export class Server {
     const newaddr = serveraddr.substr(0, serveraddr.length - 1) + lastnumber.toString();
     this.pair = socket("pair");
     this.pair.bind(newaddr);
+    this.queue = queue;
 
     const _self = this;
 
@@ -135,6 +139,7 @@ export class Server {
           uid: undefined,
           cache: undefined,
           publish: undefined,
+          push: undefined,
           sn,
         };
         for (const key in pkt.ctx /* Domain, IP, User */) {
@@ -146,6 +151,17 @@ export class Server {
         if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
           const [asynced, impl] = _self.functions.get(fun);
           ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode({...pkt, sn}));
+          ctx.push = (queuename: string, sn: string, data: any) => {
+            const event = {
+              sn,
+              data
+            };
+            if (_self.queue) {
+              msgpack_encode(event).then(pkt => {
+                _self.queue.addjob(queuename, pkt).then();
+              });
+            }
+          }
           if (!asynced) {
             const func = impl as ServerFunction;
             args ?
@@ -325,16 +341,20 @@ export interface Config {
   dbpasswd: string;
   cachehost: string;
   cacheport?: number;
+  queuehost?: string;
+  queueport?: number;
 }
 
 export class Service {
   config: Config;
   server: Server;
   processors: Processor[];
+  listeners: BusinessEventListener[];
 
   constructor(config: Config) {
     this.config = config;
     this.processors = [];
+    this.listeners = [];
   }
 
   public registerServer(server: Server): void {
@@ -343,6 +363,10 @@ export class Service {
 
   public registerProcessor(processor: Processor): void {
     this.processors.push(processor);
+  }
+
+  public registerEventListener(listener: BusinessEventListener): void {
+    this.listeners.push(listener);
   }
 
   public run(): void {
@@ -365,9 +389,19 @@ export class Service {
     };
     const pool = new Pool(dbconfig);
 
-    this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
     for (const processor of this.processors) {
       processor.init(this.config.queueaddr, pool, cacheAsync);
+    }
+
+    if (this.config.queuehost) {
+      const port = this.config.queueport ? this.config.queueport : 7711;
+      const queue = new Disq({nodes: [`${this.config.queuehost}:${port}`]});
+      this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
+      for (const listener of this.listeners) {
+        listener.init(pool, cacheAsync, queue);
+      }
+    } else {
+      this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
     }
   }
 }
@@ -549,4 +583,96 @@ export function msgpack_decode<T>(buf: Buffer): Promise<T> {
       resolve(result);
     }
   });
+}
+
+export interface BusinessEventPacket {
+  sn: string;
+  data: any;
+}
+
+export interface BusinessEventContext {
+  pool: Pool;
+  cache: RedisClient;
+  queue: Disq;
+  queuename: string;
+  db?: PGClient;
+}
+
+function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
+  const options = {
+    timeout: 10,
+    count: 1,
+  };
+  ctx.queue.getjob(ctx.queuename, options).then(job => {
+    if (job) {
+      const body = job.body as Buffer;
+      msgpack_decode(body).then((pkt: BusinessEventPacket) => {
+        ctx.pool.connect().then(db => {
+          ctx.db = db;
+          thiz.onEvent(ctx, pkt.data).then(result => {
+            db.release();
+            if (result !== undefined) {
+              msgpack_encode(result).then(buf => {
+                ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                  if (e) {
+                    console.log("Error " + e.stack);
+                  }
+                  ctx.queue.ackjob(job.id);
+                  setTimeout(on_event_timer, 0, thiz, ctx);
+                });
+              }).catch(e => {
+                console.log("Error " + e.stack);
+                ctx.queue.ackjob(job.id);
+                setTimeout(on_event_timer, 0, thiz, ctx);
+              });
+            }
+          }).catch(e => {
+            db.release();
+            msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+              ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                if (e) {
+                  console.log("Error " + e.stack);
+                }
+                setTimeout(on_event_timer, 1000, thiz, ctx);
+              });
+            }).catch(e => {
+              console.log("Error " + e.stack);
+              setTimeout(on_event_timer, 1000, thiz, ctx);
+            });
+          });
+        }).catch(e => {
+          console.log("DB connection error " + e.stack);
+          setTimeout(on_event_timer, 1000, thiz, ctx);
+        });
+      }).catch(e => {
+        console.log("Invalid event packet" + e.stack);
+        ctx.queue.ackjob(job.id);
+        setTimeout(on_event_timer, 1000, thiz, ctx);
+      });
+    } else {
+      setTimeout(on_event_timer, 1000, thiz, ctx);
+    }
+  }).catch(e => {
+    setTimeout(on_event_timer, 1000, thiz, ctx);
+  });
+}
+
+export abstract class BusinessEventListener {
+  queuename: string;
+  constructor(protected name: string) {
+    this.queuename = name;
+  }
+
+  public init(pool: Pool, cache: RedisClient, queue: Disq): void {
+    const ctx: BusinessEventContext = {
+      pool,
+      cache,
+      queue,
+      queuename: this.queuename,
+      db: undefined
+    };
+    setTimeout(on_event_timer, 1000, this, ctx);
+  }
+
+  public abstract async onEvent(ctx: BusinessEventContext, data: any) : Promise<any>;
 }

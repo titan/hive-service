@@ -3,6 +3,7 @@
 import { Socket } from "nanomsg";
 import { Pool, Client as PGClient } from "pg";
 import { RedisClient } from "redis";
+import { Disq } from "hive-disque";
 declare module "redis" {
     interface RedisClient extends NodeJS.EventEmitter {
         decrAsync(key: string): Promise<any>;
@@ -51,7 +52,8 @@ export interface ServerContext {
     uid: string;
     cache: RedisClient;
     publish: ((pkg: CmdPacket) => void);
-    sn?: string;
+    push: (queuename: string, sn: string, data: any) => void;
+    sn: string;
 }
 export interface ServerFunction {
     (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
@@ -64,10 +66,11 @@ export declare class Server {
     rep: Socket;
     pub: Socket;
     pair: Socket;
+    queue: Disq;
     functions: Map<string, [boolean, ServerFunction | AsyncServerFunction]>;
     permissions: Map<string, Map<string, boolean>>;
     constructor();
-    init(serveraddr: string, queueaddr: string, cache: RedisClient): void;
+    init(serveraddr: string, queueaddr: string, cache: RedisClient, queue?: Disq): void;
     call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void;
     callAsync(fun: string, permissions: Permission[], name: string, description: string, impl: AsyncServerFunction): void;
 }
@@ -106,14 +109,18 @@ export interface Config {
     dbpasswd: string;
     cachehost: string;
     cacheport?: number;
+    queuehost?: string;
+    queueport?: number;
 }
 export declare class Service {
     config: Config;
     server: Server;
     processors: Processor[];
+    listeners: BusinessEventListener[];
     constructor(config: Config);
     registerServer(server: Server): void;
     registerProcessor(processor: Processor): void;
+    registerEventListener(listener: BusinessEventListener): void;
     run(): void;
 }
 export declare function fib(n: number): number;
@@ -131,3 +138,21 @@ export interface Paging<T> {
 }
 export declare function msgpack_encode(obj: any): Promise<Buffer>;
 export declare function msgpack_decode<T>(buf: Buffer): Promise<T>;
+export interface BusinessEventPacket {
+    sn: string;
+    data: any;
+}
+export interface BusinessEventContext {
+    pool: Pool;
+    cache: RedisClient;
+    queue: Disq;
+    queuename: string;
+    db?: PGClient;
+}
+export declare abstract class BusinessEventListener {
+    protected name: string;
+    queuename: string;
+    constructor(name: string);
+    init(pool: Pool, cache: RedisClient, queue: Disq): void;
+    abstract onEvent(ctx: BusinessEventContext, data: any): Promise<any>;
+}

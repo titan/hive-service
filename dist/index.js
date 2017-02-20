@@ -16,6 +16,7 @@ const bluebird = require("bluebird");
 const zlib = require("zlib");
 const pg_1 = require("pg");
 const redis_1 = require("redis");
+const hive_disque_1 = require("hive-disque");
 function zlib_deflate(payload) {
     return new Promise((resolve, reject) => {
         zlib.deflate(payload, (e, newbuf) => {
@@ -49,7 +50,7 @@ class Server {
         this.functions = new Map();
         this.permissions = new Map();
     }
-    init(serveraddr, queueaddr, cache) {
+    init(serveraddr, queueaddr, cache, queue) {
         this.queueaddr = queueaddr;
         this.rep = nanomsg_1.socket("rep");
         this.rep.bind(serveraddr);
@@ -59,6 +60,7 @@ class Server {
         const newaddr = serveraddr.substr(0, serveraddr.length - 1) + lastnumber.toString();
         this.pair = nanomsg_1.socket("pair");
         this.pair.bind(newaddr);
+        this.queue = queue;
         const _self = this;
         for (const sock of [this.pair, this.rep]) {
             sock.on("data", function (buf) {
@@ -71,6 +73,7 @@ class Server {
                     uid: undefined,
                     cache: undefined,
                     publish: undefined,
+                    push: undefined,
                     sn,
                 };
                 for (const key in pkt.ctx) {
@@ -82,6 +85,17 @@ class Server {
                 if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
                     const [asynced, impl] = _self.functions.get(fun);
                     ctx.publish = (pkt) => _self.pub.send(msgpack.encode(__assign({}, pkt, { sn })));
+                    ctx.push = (queuename, sn, data) => {
+                        const event = {
+                            sn,
+                            data
+                        };
+                        if (_self.queue) {
+                            msgpack_encode(event).then(pkt => {
+                                _self.queue.addjob(queuename, pkt).then();
+                            });
+                        }
+                    };
                     if (!asynced) {
                         const func = impl;
                         args ?
@@ -233,12 +247,16 @@ class Service {
     constructor(config) {
         this.config = config;
         this.processors = [];
+        this.listeners = [];
     }
     registerServer(server) {
         this.server = server;
     }
     registerProcessor(processor) {
         this.processors.push(processor);
+    }
+    registerEventListener(listener) {
+        this.listeners.push(listener);
     }
     run() {
         const path = this.config.queueaddr.substring(this.config.queueaddr.indexOf("///") + 2, this.config.queueaddr.length);
@@ -258,9 +276,19 @@ class Service {
             idleTimeoutMillis: 30000,
         };
         const pool = new pg_1.Pool(dbconfig);
-        this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
         for (const processor of this.processors) {
             processor.init(this.config.queueaddr, pool, cacheAsync);
+        }
+        if (this.config.queuehost) {
+            const port = this.config.queueport ? this.config.queueport : 7711;
+            const queue = new hive_disque_1.Disq({ nodes: [`${this.config.queuehost}:${port}`] });
+            this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
+            for (const listener of this.listeners) {
+                listener.init(pool, cacheAsync, queue);
+            }
+        }
+        else {
+            this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
         }
     }
 }
@@ -444,3 +472,79 @@ function msgpack_decode(buf) {
     });
 }
 exports.msgpack_decode = msgpack_decode;
+function on_event_timer(thiz, ctx) {
+    const options = {
+        timeout: 10,
+        count: 1,
+    };
+    ctx.queue.getjob(ctx.queuename, options).then(job => {
+        if (job) {
+            const body = job.body;
+            msgpack_decode(body).then((pkt) => {
+                ctx.pool.connect().then(db => {
+                    ctx.db = db;
+                    thiz.onEvent(ctx, pkt.data).then(result => {
+                        db.release();
+                        if (result !== undefined) {
+                            msgpack_encode(result).then(buf => {
+                                ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                    if (e) {
+                                        console.log("Error " + e.stack);
+                                    }
+                                    ctx.queue.ackjob(job.id);
+                                    setTimeout(on_event_timer, 0, thiz, ctx);
+                                });
+                            }).catch(e => {
+                                console.log("Error " + e.stack);
+                                ctx.queue.ackjob(job.id);
+                                setTimeout(on_event_timer, 0, thiz, ctx);
+                            });
+                        }
+                    }).catch(e => {
+                        db.release();
+                        msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+                            ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                if (e) {
+                                    console.log("Error " + e.stack);
+                                }
+                                setTimeout(on_event_timer, 1000, thiz, ctx);
+                            });
+                        }).catch(e => {
+                            console.log("Error " + e.stack);
+                            setTimeout(on_event_timer, 1000, thiz, ctx);
+                        });
+                    });
+                }).catch(e => {
+                    console.log("DB connection error " + e.stack);
+                    setTimeout(on_event_timer, 1000, thiz, ctx);
+                });
+            }).catch(e => {
+                console.log("Invalid event packet" + e.stack);
+                ctx.queue.ackjob(job.id);
+                setTimeout(on_event_timer, 1000, thiz, ctx);
+            });
+        }
+        else {
+            setTimeout(on_event_timer, 1000, thiz, ctx);
+        }
+    }).catch(e => {
+        setTimeout(on_event_timer, 1000, thiz, ctx);
+    });
+}
+class BusinessEventListener {
+    constructor(name) {
+        this.name = name;
+        this.queuename = name;
+    }
+    init(pool, cache, queue) {
+        const ctx = {
+            pool,
+            cache,
+            queue,
+            queuename: this.queuename,
+            db: undefined
+        };
+        setTimeout(on_event_timer, 1000, this, ctx);
+    }
+}
+exports.BusinessEventListener = BusinessEventListener;

@@ -88,7 +88,9 @@ class Server {
                     ctx.push = (queuename, sn, data) => {
                         const event = {
                             sn,
-                            data
+                            data,
+                            domain: ctx.domain,
+                            uid: ctx.uid
                         };
                         if (_self.queue) {
                             msgpack_encode(event).then(pkt => {
@@ -256,6 +258,8 @@ function on_event_timer(thiz, ctx) {
             msgpack_decode(body).then((pkt) => {
                 ctx.pool.connect().then(db => {
                     ctx.db = db;
+                    ctx.domain = pkt.domain;
+                    ctx.uid = pkt.uid;
                     ctx.handler(ctx, pkt.data).then(result => {
                         db.release();
                         if (result !== undefined) {
@@ -315,7 +319,9 @@ class BusinessEventListener {
             queue,
             queuename: this.queuename,
             handler: this.handler,
-            db: undefined
+            db: undefined,
+            domain: undefined,
+            uid: undefined,
         };
         setTimeout(on_event_timer, 1000, ctx);
     }

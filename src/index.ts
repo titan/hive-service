@@ -156,7 +156,9 @@ export class Server {
           ctx.push = (queuename: string, sn: string, data: any) => {
             const event = {
               sn,
-              data
+              data,
+              domain: ctx.domain,
+              uid: ctx.uid
             };
             if (_self.queue) {
               msgpack_encode(event).then(pkt => {
@@ -338,6 +340,8 @@ export class Processor {
 }
 
 export interface BusinessEventPacket {
+  domain: string;
+  uid: string;
   sn: string;
   data: any;
 }
@@ -349,6 +353,8 @@ export interface BusinessEventContext {
   queuename: string;
   handler: BusinessEventHandlerFunction;
   db?: PGClient;
+  domain?: string;
+  uid?: string;
 }
 
 export interface BusinessEventHandlerFunction {
@@ -366,6 +372,8 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
       msgpack_decode(body).then((pkt: BusinessEventPacket) => {
         ctx.pool.connect().then(db => {
           ctx.db = db;
+          ctx.domain = pkt.domain;
+          ctx.uid = pkt.uid;
           ctx.handler(ctx, pkt.data).then(result => {
             db.release();
             if (result !== undefined) {
@@ -428,7 +436,9 @@ export class BusinessEventListener {
       queue,
       queuename: this.queuename,
       handler: this.handler,
-      db: undefined
+      db: undefined,
+      domain: undefined,
+      uid: undefined,
     };
     setTimeout(on_event_timer, 1000, ctx);
   }

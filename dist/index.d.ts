@@ -104,6 +104,8 @@ export declare class Processor {
     callAsync(cmd: string, impl: AsyncProcessorFunction): void;
 }
 export interface BusinessEventPacket {
+    domain: string;
+    uid: string;
     sn: string;
     data: any;
 }
@@ -114,6 +116,8 @@ export interface BusinessEventContext {
     queuename: string;
     handler: BusinessEventHandlerFunction;
     db?: PGClient;
+    domain?: string;
+    uid?: string;
 }
 export interface BusinessEventHandlerFunction {
     (ctx: BusinessEventContext, data: any): Promise<any>;

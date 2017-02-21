@@ -47,7 +47,9 @@ declare module "redis" {
 }
 
 export interface CmdPacket {
-  sn?: string;
+  domain: string;
+  uid: string;
+  sn: string;
   cmd: string;
   args: any[];
 }
@@ -150,7 +152,7 @@ export class Server {
         const args: any[] = pkt.args;
         if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
           const [asynced, impl] = _self.functions.get(fun);
-          ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode({...pkt, sn}));
+          ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode({...pkt, sn, domain: ctx.domain, uid: ctx.uid}));
           ctx.push = (queuename: string, sn: string, data: any) => {
             const event = {
               sn,
@@ -206,6 +208,8 @@ export interface ProcessorContext {
   cache: RedisClient;
   done: ((result?: any) => void);
   publish: ((pkg: CmdPacket) => void);
+  domain: string;
+  uid: string; // caller
 }
 
 export interface ProcessorFunction {
@@ -256,6 +260,8 @@ export class Processor {
           const ctx: ProcessorContext = {
             db,
             cache,
+            domain: pkt.domain,
+            uid: pkt.uid,
             done: !asynced ? (result?: any) => {
               if (result !== undefined) {
                 msgpack_encode(result).then(buf => {

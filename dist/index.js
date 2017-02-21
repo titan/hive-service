@@ -84,7 +84,7 @@ class Server {
                 const args = pkt.args;
                 if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
                     const [asynced, impl] = _self.functions.get(fun);
-                    ctx.publish = (pkt) => _self.pub.send(msgpack.encode(__assign({}, pkt, { sn })));
+                    ctx.publish = (pkt) => _self.pub.send(msgpack.encode(__assign({}, pkt, { sn, domain: ctx.domain, uid: ctx.uid })));
                     ctx.push = (queuename, sn, data) => {
                         const event = {
                             sn,
@@ -167,6 +167,8 @@ class Processor {
                     const ctx = {
                         db,
                         cache,
+                        domain: pkt.domain,
+                        uid: pkt.uid,
                         done: !asynced ? (result) => {
                             if (result !== undefined) {
                                 msgpack_encode(result).then(buf => {

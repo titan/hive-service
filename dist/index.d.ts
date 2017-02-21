@@ -41,7 +41,9 @@ declare module "redis" {
     }
 }
 export interface CmdPacket {
-    sn?: string;
+    domain: string;
+    uid: string;
+    sn: string;
     cmd: string;
     args: any[];
 }
@@ -79,6 +81,8 @@ export interface ProcessorContext {
     cache: RedisClient;
     done: ((result?: any) => void);
     publish: ((pkg: CmdPacket) => void);
+    domain: string;
+    uid: string;
 }
 export interface ProcessorFunction {
     (ctx: ProcessorContext, ...args: any[]): void;

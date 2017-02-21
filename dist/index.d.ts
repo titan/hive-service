@@ -41,9 +41,9 @@ declare module "redis" {
     }
 }
 export interface CmdPacket {
-    domain: string;
-    uid: string;
-    sn: string;
+    domain?: string;
+    uid?: string;
+    sn?: string;
     cmd: string;
     args: any[];
 }

@@ -143,6 +143,7 @@ export interface Config {
     cacheport?: number;
     queuehost?: string;
     queueport?: number;
+    log?: ((...args: any[]) => void);
 }
 export declare class Service {
     config: Config;

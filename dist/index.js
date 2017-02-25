@@ -17,18 +17,6 @@ const zlib = require("zlib");
 const pg_1 = require("pg");
 const redis_1 = require("redis");
 const hive_disque_1 = require("hive-disque");
-function zlib_deflate(payload) {
-    return new Promise((resolve, reject) => {
-        zlib.deflate(payload, (e, newbuf) => {
-            if (e) {
-                reject(e);
-            }
-            else {
-                resolve(newbuf);
-            }
-        });
-    });
-}
 function server_msgpack(sn, obj, callback) {
     const payload = msgpack.encode(obj);
     if (payload.length > 1024) {
@@ -371,7 +359,7 @@ class Service {
             max: 2 * this.processors.length,
             idleTimeoutMillis: 30000,
         };
-        const pool = new pg_1.Pool(dbconfig);
+        const pool = new pg_1.Pool(this.config.log ? __assign({}, dbconfig, { log: this.config.log }) : dbconfig);
         if (this.config.queuehost) {
             const port = this.config.queueport ? this.config.queueport : 7711;
             const queue = new hive_disque_1.Disq({ nodes: [`${this.config.queuehost}:${port}`] });

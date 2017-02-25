@@ -74,18 +74,6 @@ export interface AsyncServerFunction {
   (ctx: ServerContext, ...reset: any[]): Promise<any>;
 }
 
-function zlib_deflate(payload: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    zlib.deflate(payload, (e: Error, newbuf: Buffer) => {
-      if (e) {
-        reject(e);
-      } else {
-        resolve(newbuf);
-      }
-    });
-  });
-}
-
 function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void)) {
   const payload = msgpack.encode(obj);
   if (payload.length > 1024) {
@@ -470,6 +458,7 @@ export interface Config {
   cacheport?: number;
   queuehost?: string;
   queueport?: number;
+  log?: ((...args: any[]) => void);
 }
 
 export class Service {
@@ -514,7 +503,7 @@ export class Service {
       max: 2 * this.processors.length, // max number of clients in the pool
       idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
     };
-    const pool = new Pool(dbconfig);
+    const pool = new Pool(this.config.log ? { ...dbconfig, log: this.config.log } : dbconfig);
 
     if (this.config.queuehost) {
       const port = this.config.queueport ? this.config.queueport : 7711;

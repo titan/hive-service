@@ -168,13 +168,20 @@ export class Server {
           }
           if (!asynced) {
             const func = impl as ServerFunction;
-            args ?
-            func(ctx, (result: any) => {
-              server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
-            }, ...args) :
-            func(ctx, (result: any) => {
-              server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
-            });
+            try {
+              args ?
+                func(ctx, (result: any) => {
+                server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
+              }, ...args) :
+                func(ctx, (result: any) => {
+                server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
+              });
+            } catch (e) {
+              const payload = msgpack.encode({ code: 500, msg: e.message });
+              msgpack_encode({ sn, payload }).then(pkt => {
+                sock.send(pkt);
+              });
+            }
           } else {
             const func = impl as AsyncServerFunction;
             func(ctx, ...args).then(result => {

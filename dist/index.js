@@ -100,13 +100,21 @@ class Server {
                     };
                     if (!asynced) {
                         const func = impl;
-                        args ?
-                            func(ctx, (result) => {
-                                server_msgpack(sn, result, (buf) => { sock.send(buf); });
-                            }, ...args) :
-                            func(ctx, (result) => {
-                                server_msgpack(sn, result, (buf) => { sock.send(buf); });
+                        try {
+                            args ?
+                                func(ctx, (result) => {
+                                    server_msgpack(sn, result, (buf) => { sock.send(buf); });
+                                }, ...args) :
+                                func(ctx, (result) => {
+                                    server_msgpack(sn, result, (buf) => { sock.send(buf); });
+                                });
+                        }
+                        catch (e) {
+                            const payload = msgpack.encode({ code: 500, msg: e.message });
+                            msgpack_encode({ sn, payload }).then(pkt => {
+                                sock.send(pkt);
                             });
+                        }
                     }
                     else {
                         const func = impl;

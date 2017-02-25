@@ -79,6 +79,7 @@ export declare class Server {
 export interface ProcessorContext {
     db: PGClient;
     cache: RedisClient;
+    queue?: Disq;
     done: ((result?: any) => void);
     publish: ((pkg: CmdPacket) => void);
     domain: string;
@@ -97,8 +98,9 @@ export declare class Processor {
     functions: Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>;
     subqueueaddr: string;
     subprocessors: Processor[];
+    queue: Disq;
     constructor(subqueueaddr?: string);
-    init(queueaddr: string, pool: Pool, cache: RedisClient): void;
+    init(queueaddr: string, pool: Pool, cache: RedisClient, queue?: Disq): void;
     registerSubProcessor(processor: Processor): void;
     call(cmd: string, impl: ProcessorFunction): void;
     callAsync(cmd: string, impl: AsyncProcessorFunction): void;

@@ -208,6 +208,7 @@ export class Server {
 export interface ProcessorContext {
   db: PGClient;
   cache: RedisClient;
+  queue?: Disq;
   done: ((result?: any) => void);
   publish: ((pkg: CmdPacket) => void);
   domain: string;
@@ -229,6 +230,7 @@ export class Processor {
   functions: Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>;
   subqueueaddr: string;
   subprocessors: Processor[];
+  queue: Disq;
 
   constructor(subqueueaddr?: string) {
     this.functions = new Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>();
@@ -242,15 +244,16 @@ export class Processor {
     }
   }
 
-  public init(queueaddr: string, pool: Pool, cache: RedisClient): void {
+  public init(queueaddr: string, pool: Pool, cache: RedisClient, queue?: Disq): void {
     this.queueaddr = queueaddr;
     this.sock = socket("sub");
     this.sock.connect(this.queueaddr);
+    this.queue = queue;
     if (this.subqueueaddr) {
       this.pub = socket("pub");
       this.pub.bind(this.subqueueaddr);
       for (const subprocessor of this.subprocessors) {
-        subprocessor.init(this.subqueueaddr, pool, cache);
+        subprocessor.init(this.subqueueaddr, pool, cache, queue);
       }
     }
     const _self = this;
@@ -506,19 +509,22 @@ export class Service {
     };
     const pool = new Pool(dbconfig);
 
-    for (const processor of this.processors) {
-      processor.init(this.config.queueaddr, pool, cacheAsync);
-    }
-
     if (this.config.queuehost) {
       const port = this.config.queueport ? this.config.queueport : 7711;
       const queue = new Disq({nodes: [`${this.config.queuehost}:${port}`]});
       this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
+      for (const processor of this.processors) {
+        processor.init(this.config.queueaddr, pool, cacheAsync, queue);
+      }
       for (const listener of this.listeners) {
         listener.init(pool, cacheAsync, queue);
       }
     } else {
       this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
+
+      for (const processor of this.processors) {
+        processor.init(this.config.queueaddr, pool, cacheAsync);
+      }
     }
   }
 }

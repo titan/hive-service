@@ -149,15 +149,16 @@ class Processor {
             }
         }
     }
-    init(queueaddr, pool, cache) {
+    init(queueaddr, pool, cache, queue) {
         this.queueaddr = queueaddr;
         this.sock = nanomsg_1.socket("sub");
         this.sock.connect(this.queueaddr);
+        this.queue = queue;
         if (this.subqueueaddr) {
             this.pub = nanomsg_1.socket("pub");
             this.pub.bind(this.subqueueaddr);
             for (const subprocessor of this.subprocessors) {
-                subprocessor.init(this.subqueueaddr, pool, cache);
+                subprocessor.init(this.subqueueaddr, pool, cache, queue);
             }
         }
         const _self = this;
@@ -363,19 +364,22 @@ class Service {
             idleTimeoutMillis: 30000,
         };
         const pool = new pg_1.Pool(dbconfig);
-        for (const processor of this.processors) {
-            processor.init(this.config.queueaddr, pool, cacheAsync);
-        }
         if (this.config.queuehost) {
             const port = this.config.queueport ? this.config.queueport : 7711;
             const queue = new hive_disque_1.Disq({ nodes: [`${this.config.queuehost}:${port}`] });
             this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
+            for (const processor of this.processors) {
+                processor.init(this.config.queueaddr, pool, cacheAsync, queue);
+            }
             for (const listener of this.listeners) {
                 listener.init(pool, cacheAsync, queue);
             }
         }
         else {
             this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
+            for (const processor of this.processors) {
+                processor.init(this.config.queueaddr, pool, cacheAsync);
+            }
         }
     }
 }

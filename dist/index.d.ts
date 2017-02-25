@@ -55,6 +55,7 @@ export interface ServerContext {
     cache: RedisClient;
     publish: ((pkg: CmdPacket) => void);
     push: (queuename: string, sn: string, data: any) => void;
+    report: (level: number, error: Error) => void;
     sn: string;
 }
 export interface ServerFunction {
@@ -64,6 +65,7 @@ export interface AsyncServerFunction {
     (ctx: ServerContext, ...reset: any[]): Promise<any>;
 }
 export declare class Server {
+    modname: string;
     queueaddr: string;
     rep: Socket;
     pub: Socket;
@@ -72,7 +74,7 @@ export declare class Server {
     functions: Map<string, [boolean, ServerFunction | AsyncServerFunction]>;
     permissions: Map<string, Map<string, boolean>>;
     constructor();
-    init(serveraddr: string, queueaddr: string, cache: RedisClient, queue?: Disq): void;
+    init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, queue?: Disq): void;
     call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void;
     callAsync(fun: string, permissions: Permission[], name: string, description: string, impl: AsyncServerFunction): void;
 }
@@ -82,6 +84,7 @@ export interface ProcessorContext {
     queue?: Disq;
     done: ((result?: any) => void);
     publish: ((pkg: CmdPacket) => void);
+    report: (level: number, error: Error) => void;
     domain: string;
     uid: string;
 }
@@ -92,6 +95,7 @@ export interface AsyncProcessorFunction {
     (ctx: ProcessorContext, ...args: any[]): Promise<any>;
 }
 export declare class Processor {
+    modname: string;
     queueaddr: string;
     sock: Socket;
     pub: Socket;
@@ -100,7 +104,7 @@ export declare class Processor {
     subprocessors: Processor[];
     queue: Disq;
     constructor(subqueueaddr?: string);
-    init(queueaddr: string, pool: Pool, cache: RedisClient, queue?: Disq): void;
+    init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, queue?: Disq): void;
     registerSubProcessor(processor: Processor): void;
     call(cmd: string, impl: ProcessorFunction): void;
     callAsync(cmd: string, impl: AsyncProcessorFunction): void;
@@ -117,6 +121,7 @@ export interface BusinessEventContext {
     queue: Disq;
     queuename: string;
     handler: BusinessEventHandlerFunction;
+    report: (level: number, error: Error) => void;
     db?: PGClient;
     domain?: string;
     uid?: string;
@@ -128,10 +133,11 @@ export declare class BusinessEventListener {
     queuename: string;
     handler: BusinessEventHandlerFunction;
     constructor(queuename: string);
-    init(pool: Pool, cache: RedisClient, queue: Disq): void;
+    init(modname: string, pool: Pool, cache: RedisClient, queue: Disq): void;
     onEvent(handler: BusinessEventHandlerFunction): void;
 }
 export interface Config {
+    modname: string;
     serveraddr: string;
     queueaddr: string;
     dbhost: string;

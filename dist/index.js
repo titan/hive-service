@@ -38,7 +38,8 @@ class Server {
         this.functions = new Map();
         this.permissions = new Map();
     }
-    init(serveraddr, queueaddr, cache, queue) {
+    init(modname, serveraddr, queueaddr, cache, queue) {
+        this.modname = modname;
         this.queueaddr = queueaddr;
         this.rep = nanomsg_1.socket("rep");
         this.rep.bind(serveraddr);
@@ -62,6 +63,7 @@ class Server {
                     cache: undefined,
                     publish: undefined,
                     push: undefined,
+                    report: undefined,
                     sn,
                 };
                 for (const key in pkt.ctx) {
@@ -86,6 +88,19 @@ class Server {
                             });
                         }
                     };
+                    ctx.report = _self.queue ?
+                        (level, error) => {
+                            const payload = {
+                                module: _self.modname,
+                                function: fun,
+                                level,
+                                error
+                            };
+                            const pkt = msgpack.encode(payload);
+                            _self.queue.addjob("hive-errors", pkt).then();
+                        } :
+                        (level, error) => {
+                        };
                     if (!asynced) {
                         const func = impl;
                         try {
@@ -145,7 +160,8 @@ class Processor {
             }
         }
     }
-    init(queueaddr, pool, cache, queue) {
+    init(modname, queueaddr, pool, cache, queue) {
+        this.modname = modname;
         this.queueaddr = queueaddr;
         this.sock = nanomsg_1.socket("sub");
         this.sock.connect(this.queueaddr);
@@ -154,7 +170,7 @@ class Processor {
             this.pub = nanomsg_1.socket("pub");
             this.pub.bind(this.subqueueaddr);
             for (const subprocessor of this.subprocessors) {
-                subprocessor.init(this.subqueueaddr, pool, cache, queue);
+                subprocessor.init(modname, this.subqueueaddr, pool, cache, queue);
             }
         }
         const _self = this;
@@ -181,7 +197,20 @@ class Processor {
                                 });
                             }
                         } : undefined,
-                        publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined
+                        publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+                        report: _self.queue ?
+                            (level, error) => {
+                                const payload = {
+                                    module: _self.modname,
+                                    function: pkt.cmd,
+                                    level,
+                                    error
+                                };
+                                const epkt = msgpack.encode(payload);
+                                _self.queue.addjob("hive-errors", epkt).then();
+                            } :
+                            (level, error) => {
+                            },
                     };
                     if (!asynced) {
                         const func = impl;
@@ -309,13 +338,23 @@ class BusinessEventListener {
     constructor(queuename) {
         this.queuename = queuename;
     }
-    init(pool, cache, queue) {
+    init(modname, pool, cache, queue) {
         const ctx = {
             pool,
             cache,
             queue,
             queuename: this.queuename,
             handler: this.handler,
+            report: (level, error) => {
+                const payload = {
+                    module: modname,
+                    function: this.queuename,
+                    level,
+                    error
+                };
+                const pkt = msgpack.encode(payload);
+                queue.addjob("hive-errors", pkt).then();
+            },
             db: undefined,
             domain: undefined,
             uid: undefined,
@@ -363,18 +402,18 @@ class Service {
         if (this.config.queuehost) {
             const port = this.config.queueport ? this.config.queueport : 7711;
             const queue = new hive_disque_1.Disq({ nodes: [`${this.config.queuehost}:${port}`] });
-            this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
+            this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
             for (const processor of this.processors) {
-                processor.init(this.config.queueaddr, pool, cacheAsync, queue);
+                processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, queue);
             }
             for (const listener of this.listeners) {
-                listener.init(pool, cacheAsync, queue);
+                listener.init(this.config.modname, pool, cacheAsync, queue);
             }
         }
         else {
-            this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
+            this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync);
             for (const processor of this.processors) {
-                processor.init(this.config.queueaddr, pool, cacheAsync);
+                processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync);
             }
         }
     }

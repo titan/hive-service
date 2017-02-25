@@ -63,6 +63,7 @@ export interface ServerContext {
   cache: RedisClient;
   publish: ((pkg: CmdPacket) => void);
   push: (queuename: string, sn: string, data: any) => void;
+  report: (level: number, error: Error) => void;
   sn: string;
 }
 
@@ -90,6 +91,7 @@ function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void))
 }
 
 export class Server {
+  modname: string;
   queueaddr: string;
   rep: Socket;
   pub: Socket;
@@ -104,7 +106,8 @@ export class Server {
     this.permissions = new Map<string, Map<string, boolean>>();
   }
 
-  public init(serveraddr: string, queueaddr: string, cache: RedisClient, queue?: Disq): void {
+  public init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, queue?: Disq): void {
+    this.modname = modname;
     this.queueaddr = queueaddr;
     this.rep = socket("rep");
     this.rep.bind(serveraddr);
@@ -130,6 +133,7 @@ export class Server {
           cache: undefined,
           publish: undefined,
           push: undefined,
+          report: undefined,
           sn,
         };
         for (const key in pkt.ctx /* Domain, IP, User */) {
@@ -154,6 +158,19 @@ export class Server {
               });
             }
           }
+          ctx.report = _self.queue ?
+            (level: number, error: Error) => {
+            const payload = {
+              module: _self.modname,
+              function: fun,
+              level,
+              error
+            };
+            const pkt = msgpack.encode(payload);
+            _self.queue.addjob("hive-errors", pkt).then();
+          } :
+            (level: number, error: Error) => {
+          };
           if (!asynced) {
             const func = impl as ServerFunction;
             try {
@@ -206,6 +223,7 @@ export interface ProcessorContext {
   queue?: Disq;
   done: ((result?: any) => void);
   publish: ((pkg: CmdPacket) => void);
+  report: (level: number, error: Error) => void;
   domain: string;
   uid: string; // caller
 }
@@ -219,6 +237,7 @@ export interface AsyncProcessorFunction {
 }
 
 export class Processor {
+  modname: string;
   queueaddr: string;
   sock: Socket;
   pub: Socket;
@@ -239,7 +258,8 @@ export class Processor {
     }
   }
 
-  public init(queueaddr: string, pool: Pool, cache: RedisClient, queue?: Disq): void {
+  public init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, queue?: Disq): void {
+    this.modname = modname;
     this.queueaddr = queueaddr;
     this.sock = socket("sub");
     this.sock.connect(this.queueaddr);
@@ -248,7 +268,7 @@ export class Processor {
       this.pub = socket("pub");
       this.pub.bind(this.subqueueaddr);
       for (const subprocessor of this.subprocessors) {
-        subprocessor.init(this.subqueueaddr, pool, cache, queue);
+        subprocessor.init(modname, this.subqueueaddr, pool, cache, queue);
       }
     }
     const _self = this;
@@ -275,7 +295,20 @@ export class Processor {
                 });
               }
             } : undefined,
-            publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined
+            publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+            report: _self.queue ?
+              (level: number, error: Error) => {
+              const payload = {
+                module: _self.modname,
+                function: pkt.cmd,
+                level,
+                error
+              };
+              const epkt = msgpack.encode(payload);
+              _self.queue.addjob("hive-errors", epkt).then();
+            } :
+              (level: number, error: Error) => {
+            },
           };
           if (!asynced) {
             const func = impl as ProcessorFunction;
@@ -350,6 +383,7 @@ export interface BusinessEventContext {
   queue: Disq;
   queuename: string;
   handler: BusinessEventHandlerFunction;
+  report: (level: number, error: Error) => void;
   db?: PGClient;
   domain?: string;
   uid?: string;
@@ -427,13 +461,23 @@ export class BusinessEventListener {
     this.queuename = queuename;
   }
 
-  public init(pool: Pool, cache: RedisClient, queue: Disq): void {
+  public init(modname: string, pool: Pool, cache: RedisClient, queue: Disq): void {
     const ctx: BusinessEventContext = {
       pool,
       cache,
       queue,
       queuename: this.queuename,
       handler: this.handler,
+      report: (level: number, error: Error) => {
+        const payload = {
+          module: modname,
+          function: this.queuename,
+          level,
+          error
+        };
+        const pkt = msgpack.encode(payload);
+        queue.addjob("hive-errors", pkt).then();
+      },
       db: undefined,
       domain: undefined,
       uid: undefined,
@@ -447,6 +491,7 @@ export class BusinessEventListener {
 }
 
 export interface Config {
+  modname: string;
   serveraddr: string;
   queueaddr: string;
   dbhost: string;
@@ -508,18 +553,18 @@ export class Service {
     if (this.config.queuehost) {
       const port = this.config.queueport ? this.config.queueport : 7711;
       const queue = new Disq({nodes: [`${this.config.queuehost}:${port}`]});
-      this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
+      this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
       for (const processor of this.processors) {
-        processor.init(this.config.queueaddr, pool, cacheAsync, queue);
+        processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, queue);
       }
       for (const listener of this.listeners) {
-        listener.init(pool, cacheAsync, queue);
+        listener.init(this.config.modname, pool, cacheAsync, queue);
       }
     } else {
-      this.server.init(this.config.serveraddr, this.config.queueaddr, cacheAsync);
+      this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync);
 
       for (const processor of this.processors) {
-        processor.init(this.config.queueaddr, pool, cacheAsync);
+        processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync);
       }
     }
   }

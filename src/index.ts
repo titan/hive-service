@@ -72,7 +72,7 @@ export interface ServerFunction {
 }
 
 export interface AsyncServerFunction {
-  (ctx: ServerContext, ...reset: any[]): Promise<any>;
+  (ctx: ServerContext, ...rest: any[]): Promise<any>;
 }
 
 function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void)) {
@@ -97,6 +97,8 @@ export class Server {
   pub: Socket;
   pair: Socket;
   queue: Disq;
+  loginfo: Function;
+  logerror: Function;
 
   functions: Map<string, [boolean, ServerFunction | AsyncServerFunction]>;
   permissions: Map<string, Map<string, boolean>>; // {function => { domain => permission }}
@@ -106,7 +108,7 @@ export class Server {
     this.permissions = new Map<string, Map<string, boolean>>();
   }
 
-  public init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, queue?: Disq): void {
+  public init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void {
     this.modname = modname;
     this.queueaddr = queueaddr;
     this.rep = socket("rep");
@@ -118,6 +120,8 @@ export class Server {
     this.pair = socket("pair");
     this.pair.bind(newaddr);
     this.queue = queue;
+    this.loginfo = loginfo;
+    this.logerror = logerror;
 
     const _self = this;
 
@@ -154,7 +158,10 @@ export class Server {
             };
             if (_self.queue) {
               msgpack_encode(event).then(pkt => {
-                _self.queue.addjob(queuename, pkt).then();
+                _self.queue.addjob(queuename, pkt, () => {
+                }, (e: Error) => {
+                  logerror(e);
+                });
               });
             }
           }
@@ -167,7 +174,9 @@ export class Server {
               error
             };
             const pkt = msgpack.encode(payload);
-            _self.queue.addjob("hive-errors", pkt).then();
+            _self.queue.addjob("hive-errors", pkt, () => {}, (e: Error) => {
+              logerror(e);
+            });
           } :
             (level: number, error: Error) => {
           };
@@ -245,6 +254,8 @@ export class Processor {
   subqueueaddr: string;
   subprocessors: Processor[];
   queue: Disq;
+  loginfo: Function;
+  logerror: Function;
 
   constructor(subqueueaddr?: string) {
     this.functions = new Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>();
@@ -258,17 +269,19 @@ export class Processor {
     }
   }
 
-  public init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, queue?: Disq): void {
+  public init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void {
     this.modname = modname;
     this.queueaddr = queueaddr;
     this.sock = socket("sub");
     this.sock.connect(this.queueaddr);
     this.queue = queue;
+    this.loginfo = loginfo;
+    this.logerror = logerror;
     if (this.subqueueaddr) {
       this.pub = socket("pub");
       this.pub.bind(this.subqueueaddr);
       for (const subprocessor of this.subprocessors) {
-        subprocessor.init(modname, this.subqueueaddr, pool, cache, queue);
+        subprocessor.init(modname, this.subqueueaddr, pool, cache, loginfo, logerror, queue);
       }
     }
     const _self = this;
@@ -305,9 +318,12 @@ export class Processor {
                 error
               };
               const epkt = msgpack.encode(payload);
-              _self.queue.addjob("hive-errors", epkt).then();
+              _self.queue.addjob("hive-errors", epkt, () => {}, (e: Error) => {
+                this.logerror(e);
+              });
             } :
               (level: number, error: Error) => {
+              this.logerror(error);
             },
           };
           if (!asynced) {
@@ -315,7 +331,7 @@ export class Processor {
             try {
               func(ctx, ...pkt.args);
             } catch (e) {
-              console.log("Error " + e.stack);
+              this.logerror(e);
             } finally {
               db.release();
             }
@@ -327,32 +343,32 @@ export class Processor {
                 msgpack_encode(result).then(buf => {
                   cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                     if (e) {
-                      console.log("Error " + e.stack);
+                      this.logerror(e);
                     }
                   });
                 }).catch(e => {
-                  console.log("Error " + e.stack);
+                  this.logerror(e);
                 });
               }
             }).catch(e => {
               db.release();
-              console.log("Error " + e.stack);
+              this.logerror(e);
               msgpack_encode({ code: 500, msg: e.message }).then(buf => {
                 cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                   if (e) {
-                    console.log("Error " + e.stack);
+                    this.logerror(e);
                   }
                 });
               }).catch(e => {
-                console.log("Error " + e.stack);
+                this.logerror(e);
               });
             });
           }
         }).catch(e => {
-          console.log("DB connection error " + e.stack);
+          this.logerror(e);
         });
       } else {
-        console.error(pkt.cmd + " not found!");
+        this.loginfo(pkt.cmd + " not found!");
       }
     });
   }
@@ -384,6 +400,8 @@ export interface BusinessEventContext {
   queuename: string;
   handler: BusinessEventHandlerFunction;
   report: (level: number, error: Error) => void;
+  loginfo: Function;
+  logerror: Function;
   db?: PGClient;
   domain?: string;
   uid?: string;
@@ -398,7 +416,7 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
     timeout: 10,
     count: 1,
   };
-  ctx.queue.getjob(ctx.queuename, options).then(job => {
+  ctx.queue.getjob(ctx.queuename, options, job => {
     if (job) {
       const body = job.body as Buffer;
       msgpack_decode(body).then((pkt: BusinessEventPacket) => {
@@ -412,15 +430,23 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
               msgpack_encode(result).then(buf => {
                 ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                   if (e) {
-                    console.log("Error " + e.stack);
+                    ctx.logerror(e);
                   }
-                  ctx.queue.ackjob(job.id);
-                  setTimeout(on_event_timer, 0, ctx);
+                  ctx.queue.ackjob(job.id, () => {
+                    setTimeout(on_event_timer, 0, ctx);
+                  }, (e: Error) => {
+                    ctx.logerror(e);
+                    setTimeout(on_event_timer, 0, ctx);
+                  });
                 });
               }).catch(e => {
-                console.log("Error " + e.stack);
-                ctx.queue.ackjob(job.id);
-                setTimeout(on_event_timer, 0, ctx);
+                ctx.logerror(e);
+                ctx.queue.ackjob(job.id, () => {
+                  setTimeout(on_event_timer, 0, ctx);
+                }, (e: Error) => {
+                  ctx.logerror(e);
+                  setTimeout(on_event_timer, 0, ctx);
+                });
               });
             }
           }).catch(e => {
@@ -428,28 +454,33 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
             msgpack_encode({ code: 500, msg: e.message }).then(buf => {
               ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                 if (e) {
-                  console.log("Error " + e.stack);
+                  ctx.logerror(e);
                 }
                 setTimeout(on_event_timer, 1000, ctx);
               });
             }).catch(e => {
-              console.log("Error " + e.stack);
+              ctx.logerror(e);
               setTimeout(on_event_timer, 1000, ctx);
             });
           });
         }).catch(e => {
-          console.log("DB connection error " + e.stack);
+          ctx.logerror(e);
           setTimeout(on_event_timer, 1000, ctx);
         });
       }).catch(e => {
-        console.log("Invalid event packet" + e.stack);
-        ctx.queue.ackjob(job.id);
-        setTimeout(on_event_timer, 1000, ctx);
+        ctx.logerror(e);
+        ctx.queue.ackjob(job.id, () => {
+          setTimeout(on_event_timer, 1000, ctx);
+        }, (e: Error) => {
+          ctx.logerror(e);
+          setTimeout(on_event_timer, 1000, ctx);
+        });
       });
     } else {
       setTimeout(on_event_timer, 1000, ctx);
     }
-  }).catch(e => {
+  }, (e: Error) => {
+    ctx.logerror(e);
     setTimeout(on_event_timer, 1000, ctx);
   });
 }
@@ -461,7 +492,7 @@ export class BusinessEventListener {
     this.queuename = queuename;
   }
 
-  public init(modname: string, pool: Pool, cache: RedisClient, queue: Disq): void {
+  public init(modname: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue: Disq): void {
     const ctx: BusinessEventContext = {
       pool,
       cache,
@@ -476,8 +507,12 @@ export class BusinessEventListener {
           error
         };
         const pkt = msgpack.encode(payload);
-        queue.addjob("hive-errors", pkt).then();
+        queue.addjob("hive-errors", pkt, () => {}, (e: Error) => {
+          logerror(e);
+        });
       },
+      loginfo,
+      logerror,
       db: undefined,
       domain: undefined,
       uid: undefined,
@@ -503,7 +538,8 @@ export interface Config {
   cacheport?: number;
   queuehost?: string;
   queueport?: number;
-  log?: ((...args: any[]) => void);
+  loginfo?: ((...args: any[]) => void);
+  logerror?: ((...args: any[]) => void);
 }
 
 export class Service {
@@ -548,23 +584,23 @@ export class Service {
       max: 2 * this.processors.length, // max number of clients in the pool
       idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
     };
-    const pool = new Pool(this.config.log ? { ...dbconfig, log: this.config.log } : dbconfig);
+    const pool = new Pool(this.config.loginfo ? { ...dbconfig, log: this.config.loginfo } : dbconfig);
 
     if (this.config.queuehost) {
       const port = this.config.queueport ? this.config.queueport : 7711;
       const queue = new Disq({nodes: [`${this.config.queuehost}:${port}`]});
-      this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
+      this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, queue);
       for (const processor of this.processors) {
-        processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, queue);
+        processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, queue);
       }
       for (const listener of this.listeners) {
-        listener.init(this.config.modname, pool, cacheAsync, queue);
+        listener.init(this.config.modname, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, queue);
       }
     } else {
-      this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync);
+      this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log);
 
       for (const processor of this.processors) {
-        processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync);
+        processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log);
       }
     }
   }

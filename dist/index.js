@@ -38,7 +38,7 @@ class Server {
         this.functions = new Map();
         this.permissions = new Map();
     }
-    init(modname, serveraddr, queueaddr, cache, queue) {
+    init(modname, serveraddr, queueaddr, cache, loginfo, logerror, queue) {
         this.modname = modname;
         this.queueaddr = queueaddr;
         this.rep = nanomsg_1.socket("rep");
@@ -50,6 +50,8 @@ class Server {
         this.pair = nanomsg_1.socket("pair");
         this.pair.bind(newaddr);
         this.queue = queue;
+        this.loginfo = loginfo;
+        this.logerror = logerror;
         const _self = this;
         for (const sock of [this.pair, this.rep]) {
             sock.on("data", function (buf) {
@@ -84,7 +86,10 @@ class Server {
                         };
                         if (_self.queue) {
                             msgpack_encode(event).then(pkt => {
-                                _self.queue.addjob(queuename, pkt).then();
+                                _self.queue.addjob(queuename, pkt, () => {
+                                }, (e) => {
+                                    logerror(e);
+                                });
                             });
                         }
                     };
@@ -97,7 +102,9 @@ class Server {
                                 error
                             };
                             const pkt = msgpack.encode(payload);
-                            _self.queue.addjob("hive-errors", pkt).then();
+                            _self.queue.addjob("hive-errors", pkt, () => { }, (e) => {
+                                logerror(e);
+                            });
                         } :
                         (level, error) => {
                         };
@@ -160,17 +167,19 @@ class Processor {
             }
         }
     }
-    init(modname, queueaddr, pool, cache, queue) {
+    init(modname, queueaddr, pool, cache, loginfo, logerror, queue) {
         this.modname = modname;
         this.queueaddr = queueaddr;
         this.sock = nanomsg_1.socket("sub");
         this.sock.connect(this.queueaddr);
         this.queue = queue;
+        this.loginfo = loginfo;
+        this.logerror = logerror;
         if (this.subqueueaddr) {
             this.pub = nanomsg_1.socket("pub");
             this.pub.bind(this.subqueueaddr);
             for (const subprocessor of this.subprocessors) {
-                subprocessor.init(modname, this.subqueueaddr, pool, cache, queue);
+                subprocessor.init(modname, this.subqueueaddr, pool, cache, loginfo, logerror, queue);
             }
         }
         const _self = this;
@@ -207,9 +216,12 @@ class Processor {
                                     error
                                 };
                                 const epkt = msgpack.encode(payload);
-                                _self.queue.addjob("hive-errors", epkt).then();
+                                _self.queue.addjob("hive-errors", epkt, () => { }, (e) => {
+                                    this.logerror(e);
+                                });
                             } :
                             (level, error) => {
+                                this.logerror(error);
                             },
                     };
                     if (!asynced) {
@@ -218,7 +230,7 @@ class Processor {
                             func(ctx, ...pkt.args);
                         }
                         catch (e) {
-                            console.log("Error " + e.stack);
+                            this.logerror(e);
                         }
                         finally {
                             db.release();
@@ -232,33 +244,33 @@ class Processor {
                                 msgpack_encode(result).then(buf => {
                                     cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                         if (e) {
-                                            console.log("Error " + e.stack);
+                                            this.logerror(e);
                                         }
                                     });
                                 }).catch(e => {
-                                    console.log("Error " + e.stack);
+                                    this.logerror(e);
                                 });
                             }
                         }).catch(e => {
                             db.release();
-                            console.log("Error " + e.stack);
+                            this.logerror(e);
                             msgpack_encode({ code: 500, msg: e.message }).then(buf => {
                                 cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                     if (e) {
-                                        console.log("Error " + e.stack);
+                                        this.logerror(e);
                                     }
                                 });
                             }).catch(e => {
-                                console.log("Error " + e.stack);
+                                this.logerror(e);
                             });
                         });
                     }
                 }).catch(e => {
-                    console.log("DB connection error " + e.stack);
+                    this.logerror(e);
                 });
             }
             else {
-                console.error(pkt.cmd + " not found!");
+                this.loginfo(pkt.cmd + " not found!");
             }
         });
     }
@@ -278,7 +290,7 @@ function on_event_timer(thiz, ctx) {
         timeout: 10,
         count: 1,
     };
-    ctx.queue.getjob(ctx.queuename, options).then(job => {
+    ctx.queue.getjob(ctx.queuename, options, job => {
         if (job) {
             const body = job.body;
             msgpack_decode(body).then((pkt) => {
@@ -292,15 +304,23 @@ function on_event_timer(thiz, ctx) {
                             msgpack_encode(result).then(buf => {
                                 ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                     if (e) {
-                                        console.log("Error " + e.stack);
+                                        ctx.logerror(e);
                                     }
-                                    ctx.queue.ackjob(job.id);
-                                    setTimeout(on_event_timer, 0, ctx);
+                                    ctx.queue.ackjob(job.id, () => {
+                                        setTimeout(on_event_timer, 0, ctx);
+                                    }, (e) => {
+                                        ctx.logerror(e);
+                                        setTimeout(on_event_timer, 0, ctx);
+                                    });
                                 });
                             }).catch(e => {
-                                console.log("Error " + e.stack);
-                                ctx.queue.ackjob(job.id);
-                                setTimeout(on_event_timer, 0, ctx);
+                                ctx.logerror(e);
+                                ctx.queue.ackjob(job.id, () => {
+                                    setTimeout(on_event_timer, 0, ctx);
+                                }, (e) => {
+                                    ctx.logerror(e);
+                                    setTimeout(on_event_timer, 0, ctx);
+                                });
                             });
                         }
                     }).catch(e => {
@@ -308,29 +328,34 @@ function on_event_timer(thiz, ctx) {
                         msgpack_encode({ code: 500, msg: e.message }).then(buf => {
                             ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                 if (e) {
-                                    console.log("Error " + e.stack);
+                                    ctx.logerror(e);
                                 }
                                 setTimeout(on_event_timer, 1000, ctx);
                             });
                         }).catch(e => {
-                            console.log("Error " + e.stack);
+                            ctx.logerror(e);
                             setTimeout(on_event_timer, 1000, ctx);
                         });
                     });
                 }).catch(e => {
-                    console.log("DB connection error " + e.stack);
+                    ctx.logerror(e);
                     setTimeout(on_event_timer, 1000, ctx);
                 });
             }).catch(e => {
-                console.log("Invalid event packet" + e.stack);
-                ctx.queue.ackjob(job.id);
-                setTimeout(on_event_timer, 1000, ctx);
+                ctx.logerror(e);
+                ctx.queue.ackjob(job.id, () => {
+                    setTimeout(on_event_timer, 1000, ctx);
+                }, (e) => {
+                    ctx.logerror(e);
+                    setTimeout(on_event_timer, 1000, ctx);
+                });
             });
         }
         else {
             setTimeout(on_event_timer, 1000, ctx);
         }
-    }).catch(e => {
+    }, (e) => {
+        ctx.logerror(e);
         setTimeout(on_event_timer, 1000, ctx);
     });
 }
@@ -338,7 +363,7 @@ class BusinessEventListener {
     constructor(queuename) {
         this.queuename = queuename;
     }
-    init(modname, pool, cache, queue) {
+    init(modname, pool, cache, loginfo, logerror, queue) {
         const ctx = {
             pool,
             cache,
@@ -353,8 +378,12 @@ class BusinessEventListener {
                     error
                 };
                 const pkt = msgpack.encode(payload);
-                queue.addjob("hive-errors", pkt).then();
+                queue.addjob("hive-errors", pkt, () => { }, (e) => {
+                    logerror(e);
+                });
             },
+            loginfo,
+            logerror,
             db: undefined,
             domain: undefined,
             uid: undefined,
@@ -398,22 +427,22 @@ class Service {
             max: 2 * this.processors.length,
             idleTimeoutMillis: 30000,
         };
-        const pool = new pg_1.Pool(this.config.log ? __assign({}, dbconfig, { log: this.config.log }) : dbconfig);
+        const pool = new pg_1.Pool(this.config.loginfo ? __assign({}, dbconfig, { log: this.config.loginfo }) : dbconfig);
         if (this.config.queuehost) {
             const port = this.config.queueport ? this.config.queueport : 7711;
             const queue = new hive_disque_1.Disq({ nodes: [`${this.config.queuehost}:${port}`] });
-            this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, queue);
+            this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, queue);
             for (const processor of this.processors) {
-                processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, queue);
+                processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, queue);
             }
             for (const listener of this.listeners) {
-                listener.init(this.config.modname, pool, cacheAsync, queue);
+                listener.init(this.config.modname, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, queue);
             }
         }
         else {
-            this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync);
+            this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log);
             for (const processor of this.processors) {
-                processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync);
+                processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log);
             }
         }
     }

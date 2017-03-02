@@ -62,7 +62,7 @@ export interface ServerFunction {
     (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
 }
 export interface AsyncServerFunction {
-    (ctx: ServerContext, ...reset: any[]): Promise<any>;
+    (ctx: ServerContext, ...rest: any[]): Promise<any>;
 }
 export declare class Server {
     modname: string;
@@ -71,10 +71,12 @@ export declare class Server {
     pub: Socket;
     pair: Socket;
     queue: Disq;
+    loginfo: Function;
+    logerror: Function;
     functions: Map<string, [boolean, ServerFunction | AsyncServerFunction]>;
     permissions: Map<string, Map<string, boolean>>;
     constructor();
-    init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, queue?: Disq): void;
+    init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void;
     call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void;
     callAsync(fun: string, permissions: Permission[], name: string, description: string, impl: AsyncServerFunction): void;
 }
@@ -103,8 +105,10 @@ export declare class Processor {
     subqueueaddr: string;
     subprocessors: Processor[];
     queue: Disq;
+    loginfo: Function;
+    logerror: Function;
     constructor(subqueueaddr?: string);
-    init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, queue?: Disq): void;
+    init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void;
     registerSubProcessor(processor: Processor): void;
     call(cmd: string, impl: ProcessorFunction): void;
     callAsync(cmd: string, impl: AsyncProcessorFunction): void;
@@ -122,6 +126,8 @@ export interface BusinessEventContext {
     queuename: string;
     handler: BusinessEventHandlerFunction;
     report: (level: number, error: Error) => void;
+    loginfo: Function;
+    logerror: Function;
     db?: PGClient;
     domain?: string;
     uid?: string;
@@ -133,7 +139,7 @@ export declare class BusinessEventListener {
     queuename: string;
     handler: BusinessEventHandlerFunction;
     constructor(queuename: string);
-    init(modname: string, pool: Pool, cache: RedisClient, queue: Disq): void;
+    init(modname: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue: Disq): void;
     onEvent(handler: BusinessEventHandlerFunction): void;
 }
 export interface Config {
@@ -149,7 +155,8 @@ export interface Config {
     cacheport?: number;
     queuehost?: string;
     queueport?: number;
-    log?: ((...args: any[]) => void);
+    loginfo?: ((...args: any[]) => void);
+    logerror?: ((...args: any[]) => void);
 }
 export declare class Service {
     config: Config;

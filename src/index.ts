@@ -314,11 +314,11 @@ export class Processor {
                 msgpack_encode_async(result).then(buf => {
                   cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                     if (e) {
-                      console.log("Error " + e.stack);
+                      logerror(e);
                     }
                   });
                 }).catch(e => {
-                  console.log("Error " + e.stack);
+                  logerror(e);
                 });
               }
             } : undefined,

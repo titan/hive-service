@@ -157,11 +157,15 @@ export class Server {
               uid: ctx.uid
             };
             if (_self.queue) {
-              msgpack_encode(event).then(pkt => {
-                _self.queue.addjob(queuename, pkt, () => {
-                }, (e: Error) => {
+              msgpack_encode(event, (e: Error, pkt: Buffer) => {
+                if (e) {
                   logerror(e);
-                });
+                } else {
+                  _self.queue.addjob(queuename, pkt, () => {
+                  }, (e: Error) => {
+                    logerror(e);
+                  });
+                }
               });
             }
           }
@@ -191,9 +195,14 @@ export class Server {
                 server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
               });
             } catch (e) {
+              logerror(e);
               const payload = msgpack.encode({ code: 500, msg: e.message });
-              msgpack_encode({ sn, payload }).then(pkt => {
-                sock.send(pkt);
+              msgpack_encode({ sn, payload }, (e: Error, pkt: Buffer) => {
+                if (e) {
+                  logerror(e);
+                } else {
+                  sock.send(pkt);
+                }
               });
             }
           } else {
@@ -201,9 +210,14 @@ export class Server {
             func(ctx, ...args).then(result => {
               server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
             }).catch(e => {
+              logerror(e);
               const payload = msgpack.encode({ code: 500, msg: e.message });
-              msgpack_encode({ sn, payload }).then(pkt => {
-                sock.send(pkt);
+              msgpack_encode({ sn, payload }, (e: Error, pkt: Buffer) => {
+                if (e) {
+                  logerror(e);
+                } else {
+                  sock.send(pkt);
+                }
               });
             });
           }
@@ -297,7 +311,7 @@ export class Processor {
             uid: pkt.uid,
             done: !asynced ? (result?: any) => {
               if (result !== undefined) {
-                msgpack_encode(result).then(buf => {
+                msgpack_encode_async(result).then(buf => {
                   cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                     if (e) {
                       console.log("Error " + e.stack);
@@ -340,7 +354,7 @@ export class Processor {
             func(ctx, ...pkt.args).then(result => {
               db.release();
               if (result !== undefined) {
-                msgpack_encode(result).then(buf => {
+                msgpack_encode_async(result).then(buf => {
                   cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                     if (e) {
                       this.logerror(e);
@@ -353,7 +367,7 @@ export class Processor {
             }).catch(e => {
               db.release();
               this.logerror(e);
-              msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+              msgpack_encode_async({ code: 500, msg: e.message }).then(buf => {
                 cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                   if (e) {
                     this.logerror(e);
@@ -419,7 +433,7 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
   ctx.queue.getjob(ctx.queuename, options, job => {
     if (job) {
       const body = job.body as Buffer;
-      msgpack_decode(body).then((pkt: BusinessEventPacket) => {
+      msgpack_decode_async(body).then((pkt: BusinessEventPacket) => {
         ctx.pool.connect().then(db => {
           ctx.db = db;
           ctx.domain = pkt.domain;
@@ -427,7 +441,7 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
           ctx.handler(ctx, pkt.data).then(result => {
             db.release();
             if (result !== undefined) {
-              msgpack_encode(result).then(buf => {
+              msgpack_encode_async(result).then(buf => {
                 ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                   if (e) {
                     ctx.logerror(e);
@@ -451,7 +465,7 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
             }
           }).catch(e => {
             db.release();
-            msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+            msgpack_encode_async({ code: 500, msg: e.message }).then(buf => {
               ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                 if (e) {
                   ctx.logerror(e);
@@ -629,7 +643,7 @@ export function fiball(n: number): number {
 function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) => void), retry: number, countdown: number) {
   cache.get(reply, (err: Error, result: Buffer) => {
     if (result) {
-      msgpack_decode<any>(result).then(obj => {
+      msgpack_decode_async<any>(result).then(obj => {
         rep(obj);
       }).catch((e: Error) => {
         rep({
@@ -658,7 +672,7 @@ export function wait_for_response(cache: RedisClient, reply: string, rep: ((resu
 
 export function set_for_response(cache: RedisClient, key: string, value: any, timeout: number = 30): Promise<any> {
   return new Promise((resolve, reject) => {
-    msgpack_encode(value).then(buf => {
+    msgpack_encode_async(value).then(buf => {
       cache.setex(key, timeout, buf, (e: Error, _: any) => {
         if (e) {
           reject(e);
@@ -675,7 +689,7 @@ export function set_for_response(cache: RedisClient, key: string, value: any, ti
 function async_timer_callback(cache: RedisClient, reply: string, resolve, reject, retry: number, countdown: number) {
   cache.get(reply, (err: Error, result: Buffer) => {
     if (result) {
-      msgpack_decode<any>(result).then(obj => {
+      msgpack_decode_async<any>(result).then(obj => {
         resolve(obj);
       }).catch((e: Error) => {
         reject(e);
@@ -750,7 +764,7 @@ export interface Paging<T> {
   data: T[];
 }
 
-export function msgpack_encode(obj: any): Promise<Buffer> {
+export function msgpack_encode_async(obj: any): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const buf = msgpack.encode(obj);
     if (buf.length > 1024) {
@@ -767,7 +781,18 @@ export function msgpack_encode(obj: any): Promise<Buffer> {
   });
 }
 
-export function msgpack_decode<T>(buf: Buffer): Promise<T> {
+export function msgpack_encode(obj: any, cb: ((e: Error, buf: Buffer) => void)) {
+  const buf: Buffer = msgpack.encode(obj);
+  if (buf.length > 1024) {
+    zlib.deflate(buf, (e: Error, newbuf: Buffer) => {
+      cb(e, newbuf);
+    });
+  } else {
+    cb(null, buf);
+  }
+}
+
+export function msgpack_decode_async<T>(buf: Buffer): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     if (buf[0] === 0x78 && buf[1] === 0x9c) {
       zlib.inflate(buf, (e: Error, newbuf: Buffer) => {
@@ -783,4 +808,28 @@ export function msgpack_decode<T>(buf: Buffer): Promise<T> {
       resolve(result);
     }
   });
+}
+
+export function msgpack_decode<T>(buf: Buffer, cb: (e: Error, obj: T) => void) {
+  if (buf[0] === 0x78 && buf[1] === 0x9c) {
+    zlib.inflate(buf, (e: Error, newbuf: Buffer) => {
+      if (e) {
+        cb(e, null);
+      } else {
+        try {
+          const result: T = msgpack.decode(buf) as T;
+          cb(null, result);
+        } catch (e) {
+          cb(e, null);
+        }
+      }
+    });
+  } else {
+    try {
+      const result: T = msgpack.decode(buf) as T;
+      cb(null, result);
+    } catch (e) {
+      cb(e, null);
+    }
+  }
 }

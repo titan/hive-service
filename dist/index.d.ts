@@ -182,5 +182,7 @@ export interface Paging<T> {
     limit: number;
     data: T[];
 }
-export declare function msgpack_encode(obj: any): Promise<Buffer>;
-export declare function msgpack_decode<T>(buf: Buffer): Promise<T>;
+export declare function msgpack_encode_async(obj: any): Promise<Buffer>;
+export declare function msgpack_encode(obj: any, cb: ((e: Error, buf: Buffer) => void)): void;
+export declare function msgpack_decode_async<T>(buf: Buffer): Promise<T>;
+export declare function msgpack_decode<T>(buf: Buffer, cb: (e: Error, obj: T) => void): void;

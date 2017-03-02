@@ -85,11 +85,16 @@ class Server {
                             uid: ctx.uid
                         };
                         if (_self.queue) {
-                            msgpack_encode(event).then(pkt => {
-                                _self.queue.addjob(queuename, pkt, () => {
-                                }, (e) => {
+                            msgpack_encode(event, (e, pkt) => {
+                                if (e) {
                                     logerror(e);
-                                });
+                                }
+                                else {
+                                    _self.queue.addjob(queuename, pkt, () => {
+                                    }, (e) => {
+                                        logerror(e);
+                                    });
+                                }
                             });
                         }
                     };
@@ -120,9 +125,15 @@ class Server {
                                 });
                         }
                         catch (e) {
+                            logerror(e);
                             const payload = msgpack.encode({ code: 500, msg: e.message });
-                            msgpack_encode({ sn, payload }).then(pkt => {
-                                sock.send(pkt);
+                            msgpack_encode({ sn, payload }, (e, pkt) => {
+                                if (e) {
+                                    logerror(e);
+                                }
+                                else {
+                                    sock.send(pkt);
+                                }
                             });
                         }
                     }
@@ -131,9 +142,15 @@ class Server {
                         func(ctx, ...args).then(result => {
                             server_msgpack(sn, result, (buf) => { sock.send(buf); });
                         }).catch(e => {
+                            logerror(e);
                             const payload = msgpack.encode({ code: 500, msg: e.message });
-                            msgpack_encode({ sn, payload }).then(pkt => {
-                                sock.send(pkt);
+                            msgpack_encode({ sn, payload }, (e, pkt) => {
+                                if (e) {
+                                    logerror(e);
+                                }
+                                else {
+                                    sock.send(pkt);
+                                }
                             });
                         });
                     }
@@ -195,7 +212,7 @@ class Processor {
                         uid: pkt.uid,
                         done: !asynced ? (result) => {
                             if (result !== undefined) {
-                                msgpack_encode(result).then(buf => {
+                                msgpack_encode_async(result).then(buf => {
                                     cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                         if (e) {
                                             console.log("Error " + e.stack);
@@ -241,7 +258,7 @@ class Processor {
                         func(ctx, ...pkt.args).then(result => {
                             db.release();
                             if (result !== undefined) {
-                                msgpack_encode(result).then(buf => {
+                                msgpack_encode_async(result).then(buf => {
                                     cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                         if (e) {
                                             this.logerror(e);
@@ -254,7 +271,7 @@ class Processor {
                         }).catch(e => {
                             db.release();
                             this.logerror(e);
-                            msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+                            msgpack_encode_async({ code: 500, msg: e.message }).then(buf => {
                                 cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                     if (e) {
                                         this.logerror(e);
@@ -293,7 +310,7 @@ function on_event_timer(thiz, ctx) {
     ctx.queue.getjob(ctx.queuename, options, job => {
         if (job) {
             const body = job.body;
-            msgpack_decode(body).then((pkt) => {
+            msgpack_decode_async(body).then((pkt) => {
                 ctx.pool.connect().then(db => {
                     ctx.db = db;
                     ctx.domain = pkt.domain;
@@ -301,7 +318,7 @@ function on_event_timer(thiz, ctx) {
                     ctx.handler(ctx, pkt.data).then(result => {
                         db.release();
                         if (result !== undefined) {
-                            msgpack_encode(result).then(buf => {
+                            msgpack_encode_async(result).then(buf => {
                                 ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                     if (e) {
                                         ctx.logerror(e);
@@ -325,7 +342,7 @@ function on_event_timer(thiz, ctx) {
                         }
                     }).catch(e => {
                         db.release();
-                        msgpack_encode({ code: 500, msg: e.message }).then(buf => {
+                        msgpack_encode_async({ code: 500, msg: e.message }).then(buf => {
                             ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                 if (e) {
                                     ctx.logerror(e);
@@ -469,7 +486,7 @@ exports.fiball = fiball;
 function timer_callback(cache, reply, rep, retry, countdown) {
     cache.get(reply, (err, result) => {
         if (result) {
-            msgpack_decode(result).then(obj => {
+            msgpack_decode_async(result).then(obj => {
                 rep(obj);
             }).catch((e) => {
                 rep({
@@ -499,7 +516,7 @@ function wait_for_response(cache, reply, rep, retry = 7) {
 exports.wait_for_response = wait_for_response;
 function set_for_response(cache, key, value, timeout = 30) {
     return new Promise((resolve, reject) => {
-        msgpack_encode(value).then(buf => {
+        msgpack_encode_async(value).then(buf => {
             cache.setex(key, timeout, buf, (e, _) => {
                 if (e) {
                     reject(e);
@@ -517,7 +534,7 @@ exports.set_for_response = set_for_response;
 function async_timer_callback(cache, reply, resolve, reject, retry, countdown) {
     cache.get(reply, (err, result) => {
         if (result) {
-            msgpack_decode(result).then(obj => {
+            msgpack_decode_async(result).then(obj => {
                 resolve(obj);
             }).catch((e) => {
                 reject(e);
@@ -588,7 +605,7 @@ function rpc(domain, addr, uid, fun, ...args) {
     return p;
 }
 exports.rpc = rpc;
-function msgpack_encode(obj) {
+function msgpack_encode_async(obj) {
     return new Promise((resolve, reject) => {
         const buf = msgpack.encode(obj);
         if (buf.length > 1024) {
@@ -606,8 +623,20 @@ function msgpack_encode(obj) {
         }
     });
 }
+exports.msgpack_encode_async = msgpack_encode_async;
+function msgpack_encode(obj, cb) {
+    const buf = msgpack.encode(obj);
+    if (buf.length > 1024) {
+        zlib.deflate(buf, (e, newbuf) => {
+            cb(e, newbuf);
+        });
+    }
+    else {
+        cb(null, buf);
+    }
+}
 exports.msgpack_encode = msgpack_encode;
-function msgpack_decode(buf) {
+function msgpack_decode_async(buf) {
     return new Promise((resolve, reject) => {
         if (buf[0] === 0x78 && buf[1] === 0x9c) {
             zlib.inflate(buf, (e, newbuf) => {
@@ -625,5 +654,33 @@ function msgpack_decode(buf) {
             resolve(result);
         }
     });
+}
+exports.msgpack_decode_async = msgpack_decode_async;
+function msgpack_decode(buf, cb) {
+    if (buf[0] === 0x78 && buf[1] === 0x9c) {
+        zlib.inflate(buf, (e, newbuf) => {
+            if (e) {
+                cb(e, null);
+            }
+            else {
+                try {
+                    const result = msgpack.decode(buf);
+                    cb(null, result);
+                }
+                catch (e) {
+                    cb(e, null);
+                }
+            }
+        });
+    }
+    else {
+        try {
+            const result = msgpack.decode(buf);
+            cb(null, result);
+        }
+        catch (e) {
+            cb(e, null);
+        }
+    }
 }
 exports.msgpack_decode = msgpack_decode;

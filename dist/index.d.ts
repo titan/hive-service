@@ -126,6 +126,7 @@ export interface BusinessEventContext {
     queuename: string;
     handler: BusinessEventHandlerFunction;
     report: (level: number, error: Error) => void;
+    modname: string;
     loginfo: Function;
     logerror: Function;
     db?: PGClient;

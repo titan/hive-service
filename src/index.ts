@@ -161,7 +161,7 @@ export class Server {
                 if (e) {
                   logerror(e);
                 } else {
-                  _self.queue.addjob(queuename, pkt, () => {
+                  _self.queue.addjob(queuename, pkt, { retry: 1, ttl: 86400 * 3 }, () => {
                   }, (e: Error) => {
                     logerror(e);
                   });
@@ -414,6 +414,7 @@ export interface BusinessEventContext {
   queuename: string;
   handler: BusinessEventHandlerFunction;
   report: (level: number, error: Error) => void;
+  modname: string;
   loginfo: Function;
   logerror: Function;
   db?: PGClient;
@@ -425,7 +426,7 @@ export interface BusinessEventHandlerFunction {
   (ctx: BusinessEventContext, data: any): Promise<any>;
 }
 
-function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
+function on_event_timer(ctx: BusinessEventContext) {
   const options = {
     timeout: 10,
     count: 1,
@@ -450,6 +451,16 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
                     setTimeout(on_event_timer, 0, ctx);
                   }, (e: Error) => {
                     ctx.logerror(e);
+                    const payload = {
+                      module: ctx.modname,
+                      function: "on_event_timer",
+                      level: 0,
+                      error: e,
+                    };
+                    const pkt = msgpack.encode(payload);
+                    ctx.queue.addjob("hive-errors", pkt, () => {}, (e: Error) => {
+                      ctx.logerror(e);
+                    });
                     setTimeout(on_event_timer, 0, ctx);
                   });
                 });
@@ -459,6 +470,16 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
                   setTimeout(on_event_timer, 0, ctx);
                 }, (e: Error) => {
                   ctx.logerror(e);
+                  const payload = {
+                    module: ctx.modname,
+                    function: "on_event_timer",
+                    level: 0,
+                    error: e,
+                  };
+                  const pkt = msgpack.encode(payload);
+                  ctx.queue.addjob("hive-errors", pkt, () => {}, (e: Error) => {
+                    ctx.logerror(e);
+                  });
                   setTimeout(on_event_timer, 0, ctx);
                 });
               });
@@ -487,6 +508,16 @@ function on_event_timer(thiz:BusinessEventListener, ctx: BusinessEventContext) {
           setTimeout(on_event_timer, 1000, ctx);
         }, (e: Error) => {
           ctx.logerror(e);
+          const payload = {
+            module: ctx.modname,
+            function: "on_event_timer",
+            level: 0,
+            error: e,
+          };
+          const pkt = msgpack.encode(payload);
+          ctx.queue.addjob("hive-errors", pkt, () => {}, (e: Error) => {
+            ctx.logerror(e);
+          });
           setTimeout(on_event_timer, 1000, ctx);
         });
       });
@@ -525,6 +556,7 @@ export class BusinessEventListener {
           logerror(e);
         });
       },
+      modname,
       loginfo,
       logerror,
       db: undefined,

@@ -307,8 +307,9 @@ function on_event_timer(ctx) {
         timeout: 10,
         count: 1,
     };
-    ctx.queue.getjob(ctx.queuename, options, job => {
-        if (job) {
+    ctx.queue.getjob(ctx.queuename, options, jobs => {
+        if (jobs.length > 0) {
+            const job = jobs[0];
             const body = job.body;
             msgpack_decode_async(body).then((pkt) => {
                 ctx.pool.connect().then(db => {

@@ -149,9 +149,9 @@ export class Server {
         if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
           const [asynced, impl] = _self.functions.get(fun);
           ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode({...pkt, sn, domain: ctx.domain, uid: ctx.uid}));
-          ctx.push = (queuename: string, sn: string, data: any) => {
+          ctx.push = (queuename: string, data: any, qsn?: string) => {
             const event = {
-              sn,
+              sn: qsn || sn,
               data,
               domain: ctx.domain,
               uid: ctx.uid

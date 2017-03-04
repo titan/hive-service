@@ -90,7 +90,7 @@ class Server {
                                     logerror(e);
                                 }
                                 else {
-                                    _self.queue.addjob(queuename, pkt, { retry: 1, ttl: 86400 * 3 }, () => {
+                                    _self.queue.addjob(queuename, pkt, { retry: 0 }, () => {
                                     }, (e) => {
                                         logerror(e);
                                     });
@@ -302,6 +302,22 @@ class Processor {
     }
 }
 exports.Processor = Processor;
+function report_timer_error(ctx, fun, level, e) {
+    ctx.logerror(e);
+    const payload = {
+        module: ctx.modname,
+        function: "on_event_timer",
+        level: 0,
+        error: e,
+    };
+    const pkt = msgpack.encode(payload);
+    ctx.queue.addjob("hive-errors", pkt, () => {
+        setTimeout(on_event_timer, 1000, ctx);
+    }, (e) => {
+        ctx.logerror(e);
+        setTimeout(on_event_timer, 1000, ctx);
+    });
+}
 function on_event_timer(ctx) {
     const options = {
         timeout: 10,
@@ -311,92 +327,77 @@ function on_event_timer(ctx) {
         if (jobs.length > 0) {
             const job = jobs[0];
             const body = job.body;
-            msgpack_decode_async(body).then((pkt) => {
-                ctx.pool.connect().then(db => {
-                    ctx.db = db;
-                    ctx.domain = pkt.domain;
-                    ctx.uid = pkt.uid;
-                    ctx.handler(ctx, pkt.data).then(result => {
-                        db.release();
-                        if (result !== undefined) {
-                            msgpack_encode_async(result).then(buf => {
-                                ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
-                                    if (e) {
-                                        ctx.logerror(e);
-                                    }
-                                    ctx.queue.ackjob(job.id, () => {
-                                        setTimeout(on_event_timer, 0, ctx);
-                                    }, (e) => {
-                                        ctx.logerror(e);
-                                        const payload = {
-                                            module: ctx.modname,
-                                            function: "on_event_timer",
-                                            level: 0,
-                                            error: e,
-                                        };
-                                        const pkt = msgpack.encode(payload);
-                                        ctx.queue.addjob("hive-errors", pkt, () => { }, (e) => {
+            msgpack_decode(body, (e, pkt) => {
+                if (e) {
+                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode", 0, e);
+                }
+                else {
+                    ctx.pool.connect((err, db, done) => {
+                        if (err) {
+                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect", 0, err);
+                        }
+                        else {
+                            ctx.db = db;
+                            ctx.domain = pkt.domain;
+                            ctx.uid = pkt.uid;
+                            ctx.handler(ctx, pkt.data).then(result => {
+                                done();
+                                if (result !== undefined) {
+                                    msgpack_encode(result, (e, buf) => {
+                                        if (e) {
+                                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e);
+                                        }
+                                        else {
+                                            ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                                if (e) {
+                                                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e);
+                                                }
+                                                else {
+                                                    setTimeout(on_event_timer, 0, ctx);
+                                                }
+                                            });
+                                        }
+                                    });
+                                }
+                                else {
+                                    msgpack_encode({ code: 500, msg: `${ctx.modname} 的 BusinessEventHandlerFunction 没有返回结果` }, (e, buf) => {
+                                        if (e) {
                                             ctx.logerror(e);
-                                        });
-                                        setTimeout(on_event_timer, 0, ctx);
+                                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e);
+                                        }
+                                        else {
+                                            ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                                if (e) {
+                                                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e);
+                                                }
+                                                else {
+                                                    setTimeout(on_event_timer, 1000, ctx);
+                                                }
+                                            });
+                                        }
                                     });
-                                });
+                                }
                             }).catch(e => {
-                                ctx.logerror(e);
-                                ctx.queue.ackjob(job.id, () => {
-                                    setTimeout(on_event_timer, 0, ctx);
-                                }, (e) => {
-                                    ctx.logerror(e);
-                                    const payload = {
-                                        module: ctx.modname,
-                                        function: "on_event_timer",
-                                        level: 0,
-                                        error: e,
-                                    };
-                                    const pkt = msgpack.encode(payload);
-                                    ctx.queue.addjob("hive-errors", pkt, () => { }, (e) => {
-                                        ctx.logerror(e);
-                                    });
-                                    setTimeout(on_event_timer, 0, ctx);
+                                done();
+                                msgpack_encode({ code: 500, msg: e.message }, (e, buf) => {
+                                    if (e) {
+                                        report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode", 0, e);
+                                    }
+                                    else {
+                                        ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                            if (e) {
+                                                report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode/setex", 0, e);
+                                            }
+                                            else {
+                                                setTimeout(on_event_timer, 1000, ctx);
+                                            }
+                                        });
+                                    }
                                 });
                             });
                         }
-                    }).catch(e => {
-                        db.release();
-                        msgpack_encode_async({ code: 500, msg: e.message }).then(buf => {
-                            ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
-                                if (e) {
-                                    ctx.logerror(e);
-                                }
-                                setTimeout(on_event_timer, 1000, ctx);
-                            });
-                        }).catch(e => {
-                            ctx.logerror(e);
-                            setTimeout(on_event_timer, 1000, ctx);
-                        });
                     });
-                }).catch(e => {
-                    ctx.logerror(e);
-                    setTimeout(on_event_timer, 1000, ctx);
-                });
-            }).catch(e => {
-                ctx.logerror(e);
-                ctx.queue.ackjob(job.id, () => {
-                    setTimeout(on_event_timer, 1000, ctx);
-                }, (e) => {
-                    ctx.logerror(e);
-                    const payload = {
-                        module: ctx.modname,
-                        function: "on_event_timer",
-                        level: 0,
-                        error: e,
-                    };
-                    const pkt = msgpack.encode(payload);
-                    ctx.queue.addjob("hive-errors", pkt, () => { }, (e) => {
-                        ctx.logerror(e);
-                    });
-                    setTimeout(on_event_timer, 1000, ctx);
-                });
+                }
             });
         }
         else {
@@ -404,7 +405,7 @@ function on_event_timer(ctx) {
         }
     }, (e) => {
         ctx.logerror(e);
-        setTimeout(on_event_timer, 1000, ctx);
+        report_timer_error(ctx, "on_event_timer/getjob.error", 0, e);
     });
 }
 class BusinessEventListener {

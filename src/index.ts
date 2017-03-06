@@ -62,7 +62,7 @@ export interface ServerContext {
   uid: string;
   cache: RedisClient;
   publish: ((pkg: CmdPacket) => void);
-  push: (queuename: string, sn: string, data: any) => void;
+  push: (queuename: string, data: any, qsn?: string) => void;
   report: (level: number, error: Error) => void;
   sn: string;
 }

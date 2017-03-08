@@ -726,7 +726,7 @@ function async_timer_callback(cache: RedisClient, reply: string, resolve, reject
       e.message = "Request Timeout";
       reject(e);
     } else {
-      setTimeout(timer_callback, fib(retry - countdown) * 1000, cache, reply, resolve, reject, retry, countdown - 1);
+      setTimeout(async_timer_callback, fib(retry - countdown) * 1000, cache, reply, resolve, reject, retry, countdown - 1);
     }
   });
 }

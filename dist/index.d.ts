@@ -86,7 +86,6 @@ export interface ProcessorContext {
     db: PGClient;
     cache: RedisClient;
     queue?: Disq;
-    done: ((result?: any) => void);
     publish: ((pkg: CmdPacket) => void);
     report: (level: number, error: Error) => void;
     domain: string;

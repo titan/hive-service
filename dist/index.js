@@ -210,19 +210,6 @@ class Processor {
                         cache,
                         domain: pkt.domain,
                         uid: pkt.uid,
-                        done: !asynced ? (result) => {
-                            if (result !== undefined) {
-                                msgpack_encode_async(result).then(buf => {
-                                    cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
-                                        if (e) {
-                                            logerror(e);
-                                        }
-                                    });
-                                }).catch(e => {
-                                    logerror(e);
-                                });
-                            }
-                        } : undefined,
                         publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
                         report: _self.queue ?
                             (level, error) => {

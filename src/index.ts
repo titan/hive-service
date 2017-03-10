@@ -246,7 +246,6 @@ export interface ProcessorContext {
   db: PGClient;
   cache: RedisClient;
   queue?: Disq;
-  done: ((result?: any) => void);
   publish: ((pkg: CmdPacket) => void);
   report: (level: number, error: Error) => void;
   domain: string;
@@ -311,19 +310,6 @@ export class Processor {
             cache,
             domain: pkt.domain,
             uid: pkt.uid,
-            done: !asynced ? (result?: any) => {
-              if (result !== undefined) {
-                msgpack_encode_async(result).then(buf => {
-                  cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
-                    if (e) {
-                      logerror(e);
-                    }
-                  });
-                }).catch(e => {
-                  logerror(e);
-                });
-              }
-            } : undefined,
             publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
             report: _self.queue ?
               (level: number, error: Error) => {

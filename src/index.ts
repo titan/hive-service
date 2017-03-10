@@ -242,7 +242,25 @@ export class Server {
   }
 }
 
+function report_processor_error(ctx: ProcessorContext, fun: string, level: number, e: Error) {
+  ctx.logerror(e);
+  const payload = {
+    module: ctx.modname,
+    function: fun,
+    level: 0,
+    error: e,
+  };
+  const pkt = msgpack.encode(payload);
+  if (ctx.queue) {
+    ctx.queue.addjob("hive-errors", pkt, () => {
+    }, (e: Error) => {
+      ctx.logerror(e);
+    });
+  }
+}
+
 export interface ProcessorContext {
+  modname: string;
   db: PGClient;
   cache: RedisClient;
   queue?: Disq;
@@ -250,6 +268,7 @@ export interface ProcessorContext {
   report: (level: number, error: Error) => void;
   domain: string;
   uid: string; // caller
+  logerror: Function;
 }
 
 export interface ProcessorFunction {
@@ -269,8 +288,6 @@ export class Processor {
   subqueueaddr: string;
   subprocessors: Processor[];
   queue: Disq;
-  loginfo: Function;
-  logerror: Function;
 
   constructor(subqueueaddr?: string) {
     this.functions = new Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>();
@@ -290,8 +307,6 @@ export class Processor {
     this.sock = socket("sub");
     this.sock.connect(this.queueaddr);
     this.queue = queue;
-    this.loginfo = loginfo;
-    this.logerror = logerror;
     if (this.subqueueaddr) {
       this.pub = socket("pub");
       this.pub.bind(this.subqueueaddr);
@@ -304,73 +319,93 @@ export class Processor {
       const pkt: CmdPacket = msgpack.decode(buf);
       if (_self.functions.has(pkt.cmd)) {
         const [asynced, impl] = _self.functions.get(pkt.cmd);
-        pool.connect().then(db => {
-          const ctx: ProcessorContext = {
-            db,
-            cache,
-            domain: pkt.domain,
-            uid: pkt.uid,
-            publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
-            report: _self.queue ?
-              (level: number, error: Error) => {
-              const payload = {
-                module: _self.modname,
-                function: pkt.cmd,
-                level,
-                error
-              };
-              const epkt = msgpack.encode(payload);
-              _self.queue.addjob("hive-errors", epkt, () => {}, (e: Error) => {
-                this.logerror(e);
-              });
-            } :
-              (level: number, error: Error) => {
-              this.logerror(error);
-            },
-          };
-          if (!asynced) {
-            const func = impl as ProcessorFunction;
-            try {
-              func(ctx, ...pkt.args);
-            } catch (e) {
-              this.logerror(e);
-            } finally {
-              db.release();
-            }
+        pool.connect((err: Error, db: PGClient, done: () => void) => {
+          if (err) {
+            const ctx:  ProcessorContext = {
+              modname,
+              queue,
+              db: null,
+              cache: null,
+              domain: null,
+              uid: null,
+              publish: null,
+              report: null,
+              logerror: null,
+            };
+            report_processor_error(ctx, "pool.connect", 0, err);
           } else {
-            const func = impl as AsyncProcessorFunction;
-            func(ctx, ...pkt.args).then(result => {
-              db.release();
-              if (result !== undefined) {
-                msgpack_encode_async(result).then(buf => {
-                  cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+            const ctx: ProcessorContext = {
+              modname,
+              db,
+              cache,
+              domain: pkt.domain,
+              uid: pkt.uid,
+              queue,
+              publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+              report: queue ?
+              (level: number, error: Error) => {
+                const payload = {
+                  module: _self.modname,
+                  function: pkt.cmd,
+                  level,
+                  error
+                };
+                const epkt = msgpack.encode(payload);
+                queue.addjob("hive-errors", epkt, () => {}, (e: Error) => {
+                  logerror(e);
+                });
+              } :
+              (level: number, error: Error) => {
+                logerror(error);
+              },
+              logerror,
+            };
+            if (!asynced) {
+              const func = impl as ProcessorFunction;
+              try {
+                func(ctx, ...pkt.args);
+              } catch (e) {
+                report_processor_error(ctx, pkt.cmd, 0, e);
+              } finally {
+                done();
+              }
+            } else {
+              const func = impl as AsyncProcessorFunction;
+              func(ctx, ...pkt.args).then(result => {
+                done();
+                if (result !== undefined) {
+                  msgpack_encode(result, (e: Error, buf: Buffer) => {
                     if (e) {
-                      this.logerror(e);
+                      report_processor_error(ctx, "processor/asyncfunc/msgpack_encode", 0, e);
+                    } else {
+                      cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                        if (e) {
+                          report_processor_error(ctx, "processor/asyncfunc/msgpack_encode/setex", 0, e);
+                        }
+                      });
                     }
                   });
-                }).catch(e => {
-                  this.logerror(e);
-                });
-              }
-            }).catch(e => {
-              db.release();
-              this.logerror(e);
-              msgpack_encode_async({ code: 500, msg: e.message }).then(buf => {
-                cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                }
+              }).catch(e => {
+                done();
+                report_processor_error(ctx, pkt.cmd, 0, e);
+                msgpack_encode({ code: 500, msg: e.message }, (e: Error, buf: Buffer) => {
                   if (e) {
-                    this.logerror(e);
+                    report_processor_error(ctx, "processor/asyncfunc-catch/msgpack_encode", 0, e);
+                  } else {
+                    cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                      if (e) {
+                        report_processor_error(ctx, "processor/asyncfunc-catch/msgpack_encode/setex", 0, e);
+                      }
+                    });
                   }
                 });
-              }).catch(e => {
-                this.logerror(e);
               });
-            });
+            }
           }
-        }).catch(e => {
-          this.logerror(e);
         });
       } else {
-        this.loginfo(pkt.cmd + " not found!");
+        loginfo(pkt.cmd + " not found!");
       }
     });
   }

@@ -83,6 +83,7 @@ export declare class Server {
     callAsync(fun: string, permissions: Permission[], name: string, description: string, impl: AsyncServerFunction): void;
 }
 export interface ProcessorContext {
+    modname: string;
     db: PGClient;
     cache: RedisClient;
     queue?: Disq;
@@ -90,6 +91,7 @@ export interface ProcessorContext {
     report: (level: number, error: Error) => void;
     domain: string;
     uid: string;
+    logerror: Function;
 }
 export interface ProcessorFunction {
     (ctx: ProcessorContext, ...args: any[]): void;
@@ -106,8 +108,6 @@ export declare class Processor {
     subqueueaddr: string;
     subprocessors: Processor[];
     queue: Disq;
-    loginfo: Function;
-    logerror: Function;
     constructor(subqueueaddr?: string);
     init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void;
     registerSubProcessor(processor: Processor): void;

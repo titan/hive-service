@@ -172,6 +172,22 @@ class Server {
     }
 }
 exports.Server = Server;
+function report_processor_error(ctx, fun, level, e) {
+    ctx.logerror(e);
+    const payload = {
+        module: ctx.modname,
+        function: fun,
+        level: 0,
+        error: e,
+    };
+    const pkt = msgpack.encode(payload);
+    if (ctx.queue) {
+        ctx.queue.addjob("hive-errors", pkt, () => {
+        }, (e) => {
+            ctx.logerror(e);
+        });
+    }
+}
 class Processor {
     constructor(subqueueaddr) {
         this.functions = new Map();
@@ -190,8 +206,6 @@ class Processor {
         this.sock = nanomsg_1.socket("sub");
         this.sock.connect(this.queueaddr);
         this.queue = queue;
-        this.loginfo = loginfo;
-        this.logerror = logerror;
         if (this.subqueueaddr) {
             this.pub = nanomsg_1.socket("pub");
             this.pub.bind(this.subqueueaddr);
@@ -204,77 +218,100 @@ class Processor {
             const pkt = msgpack.decode(buf);
             if (_self.functions.has(pkt.cmd)) {
                 const [asynced, impl] = _self.functions.get(pkt.cmd);
-                pool.connect().then(db => {
-                    const ctx = {
-                        db,
-                        cache,
-                        domain: pkt.domain,
-                        uid: pkt.uid,
-                        publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
-                        report: _self.queue ?
-                            (level, error) => {
-                                const payload = {
-                                    module: _self.modname,
-                                    function: pkt.cmd,
-                                    level,
-                                    error
-                                };
-                                const epkt = msgpack.encode(payload);
-                                _self.queue.addjob("hive-errors", epkt, () => { }, (e) => {
-                                    this.logerror(e);
-                                });
-                            } :
-                            (level, error) => {
-                                this.logerror(error);
-                            },
-                    };
-                    if (!asynced) {
-                        const func = impl;
-                        try {
-                            func(ctx, ...pkt.args);
-                        }
-                        catch (e) {
-                            this.logerror(e);
-                        }
-                        finally {
-                            db.release();
-                        }
+                pool.connect((err, db, done) => {
+                    if (err) {
+                        const ctx = {
+                            modname,
+                            queue,
+                            db: null,
+                            cache: null,
+                            domain: null,
+                            uid: null,
+                            publish: null,
+                            report: null,
+                            logerror: null,
+                        };
+                        report_processor_error(ctx, "pool.connect", 0, err);
                     }
                     else {
-                        const func = impl;
-                        func(ctx, ...pkt.args).then(result => {
-                            db.release();
-                            if (result !== undefined) {
-                                msgpack_encode_async(result).then(buf => {
-                                    cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                        const ctx = {
+                            modname,
+                            db,
+                            cache,
+                            domain: pkt.domain,
+                            uid: pkt.uid,
+                            queue,
+                            publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+                            report: queue ?
+                                (level, error) => {
+                                    const payload = {
+                                        module: _self.modname,
+                                        function: pkt.cmd,
+                                        level,
+                                        error
+                                    };
+                                    const epkt = msgpack.encode(payload);
+                                    queue.addjob("hive-errors", epkt, () => { }, (e) => {
+                                        logerror(e);
+                                    });
+                                } :
+                                (level, error) => {
+                                    logerror(error);
+                                },
+                            logerror,
+                        };
+                        if (!asynced) {
+                            const func = impl;
+                            try {
+                                func(ctx, ...pkt.args);
+                            }
+                            catch (e) {
+                                report_processor_error(ctx, pkt.cmd, 0, e);
+                            }
+                            finally {
+                                done();
+                            }
+                        }
+                        else {
+                            const func = impl;
+                            func(ctx, ...pkt.args).then(result => {
+                                done();
+                                if (result !== undefined) {
+                                    msgpack_encode(result, (e, buf) => {
                                         if (e) {
-                                            this.logerror(e);
+                                            report_processor_error(ctx, "processor/asyncfunc/msgpack_encode", 0, e);
+                                        }
+                                        else {
+                                            cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                                if (e) {
+                                                    report_processor_error(ctx, "processor/asyncfunc/msgpack_encode/setex", 0, e);
+                                                }
+                                            });
                                         }
                                     });
-                                }).catch(e => {
-                                    this.logerror(e);
-                                });
-                            }
-                        }).catch(e => {
-                            db.release();
-                            this.logerror(e);
-                            msgpack_encode_async({ code: 500, msg: e.message }).then(buf => {
-                                cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                }
+                            }).catch(e => {
+                                done();
+                                report_processor_error(ctx, pkt.cmd, 0, e);
+                                msgpack_encode({ code: 500, msg: e.message }, (e, buf) => {
                                     if (e) {
-                                        this.logerror(e);
+                                        report_processor_error(ctx, "processor/asyncfunc-catch/msgpack_encode", 0, e);
+                                    }
+                                    else {
+                                        cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                            if (e) {
+                                                report_processor_error(ctx, "processor/asyncfunc-catch/msgpack_encode/setex", 0, e);
+                                            }
+                                        });
                                     }
                                 });
-                            }).catch(e => {
-                                this.logerror(e);
                             });
-                        });
+                        }
                     }
-                }).catch(e => {
-                    this.logerror(e);
                 });
             }
             else {
-                this.loginfo(pkt.cmd + " not found!");
+                loginfo(pkt.cmd + " not found!");
             }
         });
     }

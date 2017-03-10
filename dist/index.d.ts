@@ -35,6 +35,7 @@ declare module "redis" {
         zcountAsync(key: string, min: string | number, max: string | number): Promise<any>;
         zrangeAsync(key: string, start: number, stop: number): Promise<any>;
         zrevrangebyscoreAsync(key: string, start: number | string, stop: number | string, limit?: string, offset?: number, count?: number): Promise<any>;
+        zremrangebyscoreAsync(key: string, start: number | string, stop: number | string): Promise<any>;
     }
     interface Multi extends NodeJS.EventEmitter {
         execAsync(): Promise<any>;

@@ -39,6 +39,7 @@ declare module "redis" {
     zaddAsync(key: string, score: number, member: string | number | Buffer): Promise<any>;
     zcountAsync(key: string, min: string | number, max: string | number): Promise<any>;
     zrangeAsync(key: string, start: number, stop: number): Promise<any>;
+    zrevrangeAsync(key: string, start: number, stop: number): Promise<any>;
     zrevrangebyscoreAsync(key: string, start: number | string, stop: number | string, limit?: string, offset?: number, count?: number): Promise<any>;
     zremrangebyscoreAsync(key: string, start: number | string, stop: number | string): Promise<any>;
   }

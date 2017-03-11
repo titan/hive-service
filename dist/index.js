@@ -228,6 +228,7 @@ class Processor {
                             cache: null,
                             domain: null,
                             uid: null,
+                            sn: null,
                             publish: null,
                             report: null,
                             logerror: null,
@@ -241,6 +242,7 @@ class Processor {
                             cache,
                             domain: pkt.domain,
                             uid: pkt.uid,
+                            sn: pkt.sn,
                             queue,
                             publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
                             report: queue ?
@@ -264,7 +266,7 @@ class Processor {
                         if (!asynced) {
                             const func = impl;
                             try {
-                                func(ctx, ...pkt.args);
+                                pkt.args ? func(ctx, ...pkt.args) : func(ctx);
                             }
                             catch (e) {
                                 report_processor_error(ctx, pkt.cmd, 0, e);
@@ -275,7 +277,8 @@ class Processor {
                         }
                         else {
                             const func = impl;
-                            func(ctx, ...pkt.args).then(result => {
+                            const r = pkt.args ? func(ctx, ...pkt.args) : func(ctx);
+                            r.then(result => {
                                 done();
                                 if (result !== undefined) {
                                     msgpack_encode(result, (e, buf) => {

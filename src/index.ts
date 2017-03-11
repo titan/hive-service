@@ -269,6 +269,7 @@ export interface ProcessorContext {
   report: (level: number, error: Error) => void;
   domain: string;
   uid: string; // caller
+  sn: string;
   logerror: Function;
 }
 
@@ -329,6 +330,7 @@ export class Processor {
               cache: null,
               domain: null,
               uid: null,
+              sn: null,
               publish: null,
               report: null,
               logerror: null,
@@ -341,6 +343,7 @@ export class Processor {
               cache,
               domain: pkt.domain,
               uid: pkt.uid,
+              sn: pkt.sn,
               queue,
               publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
               report: queue ?
@@ -364,7 +367,7 @@ export class Processor {
             if (!asynced) {
               const func = impl as ProcessorFunction;
               try {
-                func(ctx, ...pkt.args);
+                pkt.args ? func(ctx, ...pkt.args) : func(ctx);
               } catch (e) {
                 report_processor_error(ctx, pkt.cmd, 0, e);
               } finally {
@@ -372,7 +375,8 @@ export class Processor {
               }
             } else {
               const func = impl as AsyncProcessorFunction;
-              func(ctx, ...pkt.args).then(result => {
+              const r = pkt.args ? func(ctx, ...pkt.args) : func(ctx);
+              r.then(result => {
                 done();
                 if (result !== undefined) {
                   msgpack_encode(result, (e: Error, buf: Buffer) => {

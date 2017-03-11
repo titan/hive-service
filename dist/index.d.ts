@@ -91,6 +91,7 @@ export interface ProcessorContext {
     report: (level: number, error: Error) => void;
     domain: string;
     uid: string;
+    sn: string;
     logerror: Function;
 }
 export interface ProcessorFunction {

@@ -209,7 +209,8 @@ export class Server {
             }
           } else {
             const func = impl as AsyncServerFunction;
-            func(ctx, ...args).then(result => {
+            const result = args ? func(ctx, ...args) : func(ctx);
+            result.then(result => {
               server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
             }).catch(e => {
               logerror(e);

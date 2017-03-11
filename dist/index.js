@@ -139,7 +139,8 @@ class Server {
                     }
                     else {
                         const func = impl;
-                        func(ctx, ...args).then(result => {
+                        const result = args ? func(ctx, ...args) : func(ctx);
+                        result.then(result => {
                             server_msgpack(sn, result, (buf) => { sock.send(buf); });
                         }).catch(e => {
                             logerror(e);

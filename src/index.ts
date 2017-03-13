@@ -721,7 +721,7 @@ export function waiting(ctx: ServerContext, rep: ((result: any) => void), retry:
 }
 
 export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry: number = 7) {
-  setTimeout(timer_callback, 500, cache, reply, rep, retry + 1, retry);
+  setTimeout(timer_callback, 100, cache, reply, rep, retry + 1, retry);
 }
 
 export function set_for_response(cache: RedisClient, key: string, value: any, timeout: number = 30): Promise<any> {
@@ -765,7 +765,49 @@ export function waitingAsync(ctx: ServerContext, retry: number = 7): Promise<any
   });
 }
 
-export function rpc<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T> {
+export function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: any) => void), fun: string, ...args: any[]) {
+  let a = [];
+  if (args != null) {
+    a = [...args];
+  }
+  const params = {
+    ctx: {
+      domain: domain,
+      ip:     ip.address(),
+      uid:    uid
+    },
+    fun: fun,
+    args: a
+  };
+  const sn = crypto.randomBytes(64).toString("base64");
+  const req = socket("req");
+  req.connect(addr);
+  req.on("data", (msg) => {
+    const data: Object = msgpack.decode(msg);
+    if (sn === data["sn"]) {
+      if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
+        zlib.inflate(data["payload"], (e: Error, newbuf: Buffer) => {
+          if (e) {
+            req.close();
+            cb(e, null);
+          } else {
+            req.close();
+            cb(null, msgpack.decode(newbuf));
+          }
+        });
+      } else {
+        req.close();
+        cb(null, msgpack.decode(data["payload"]));
+      }
+    } else {
+      req.close();
+      cb(new Error("Invalid calling sequence number"), null);
+    }
+  });
+  req.send(msgpack.encode({ sn, pkt: params }));
+}
+
+export function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T> {
   const p = new Promise<T>(function (resolve, reject) {
     let a = [];
     if (args != null) {
@@ -783,7 +825,6 @@ export function rpc<T>(domain: string, addr: string, uid: string, fun: string, .
     const sn = crypto.randomBytes(64).toString("base64");
     const req = socket("req");
     req.connect(addr);
-
     req.on("data", (msg) => {
       const data: Object = msgpack.decode(msg);
       if (sn === data["sn"]) {

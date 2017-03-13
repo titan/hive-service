@@ -572,7 +572,7 @@ function waiting(ctx, rep, retry = 7) {
 }
 exports.waiting = waiting;
 function wait_for_response(cache, reply, rep, retry = 7) {
-    setTimeout(timer_callback, 500, cache, reply, rep, retry + 1, retry);
+    setTimeout(timer_callback, 100, cache, reply, rep, retry + 1, retry);
 }
 exports.wait_for_response = wait_for_response;
 function set_for_response(cache, key, value, timeout = 30) {
@@ -618,7 +618,52 @@ function waitingAsync(ctx, retry = 7) {
     });
 }
 exports.waitingAsync = waitingAsync;
-function rpc(domain, addr, uid, fun, ...args) {
+function rpc(domain, addr, uid, cb, fun, ...args) {
+    let a = [];
+    if (args != null) {
+        a = [...args];
+    }
+    const params = {
+        ctx: {
+            domain: domain,
+            ip: ip.address(),
+            uid: uid
+        },
+        fun: fun,
+        args: a
+    };
+    const sn = crypto.randomBytes(64).toString("base64");
+    const req = nanomsg_1.socket("req");
+    req.connect(addr);
+    req.on("data", (msg) => {
+        const data = msgpack.decode(msg);
+        if (sn === data["sn"]) {
+            if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
+                zlib.inflate(data["payload"], (e, newbuf) => {
+                    if (e) {
+                        req.close();
+                        cb(e, null);
+                    }
+                    else {
+                        req.close();
+                        cb(null, msgpack.decode(newbuf));
+                    }
+                });
+            }
+            else {
+                req.close();
+                cb(null, msgpack.decode(data["payload"]));
+            }
+        }
+        else {
+            req.close();
+            cb(new Error("Invalid calling sequence number"), null);
+        }
+    });
+    req.send(msgpack.encode({ sn, pkt: params }));
+}
+exports.rpc = rpc;
+function rpcAsync(domain, addr, uid, fun, ...args) {
     const p = new Promise(function (resolve, reject) {
         let a = [];
         if (args != null) {
@@ -665,7 +710,7 @@ function rpc(domain, addr, uid, fun, ...args) {
     });
     return p;
 }
-exports.rpc = rpc;
+exports.rpcAsync = rpcAsync;
 function msgpack_encode_async(obj) {
     return new Promise((resolve, reject) => {
         const buf = msgpack.encode(obj);

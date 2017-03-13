@@ -166,10 +166,10 @@ export declare class Service {
 }
 export declare function fib(n: number): number;
 export declare function fiball(n: number): number;
-export declare function waiting(ctx: Context, rep: ((result: any) => void), retry?: number): void;
+export declare function waiting(ctx: Context, rep: ((result: any) => void), sn?: string, retry?: number): void;
 export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry?: number): void;
 export declare function set_for_response(cache: RedisClient, key: string, value: any, timeout?: number): Promise<any>;
-export declare function waitingAsync(ctx: Context, retry?: number): Promise<any>;
+export declare function waitingAsync(ctx: Context, sn?: string, retry?: number): Promise<any>;
 export declare function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: any) => void), fun: string, ...args: any[]): void;
 export declare function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T>;
 export interface Paging<T> {

@@ -570,8 +570,8 @@ function timer_callback(cache, reply, rep, retry, countdown) {
         }
     });
 }
-function waiting(ctx, rep, retry = 7) {
-    setTimeout(timer_callback, 100, ctx.cache, `results:${ctx.sn}`, rep, retry + 1, retry);
+function waiting(ctx, rep, sn = ctx.sn, retry = 7) {
+    setTimeout(timer_callback, 100, ctx.cache, `results:${sn}`, rep, retry + 1, retry);
 }
 exports.waiting = waiting;
 function wait_for_response(cache, reply, rep, retry = 7) {
@@ -615,9 +615,9 @@ function async_timer_callback(cache, reply, resolve, reject, retry, countdown) {
         }
     });
 }
-function waitingAsync(ctx, retry = 7) {
+function waitingAsync(ctx, sn = ctx.sn, retry = 7) {
     return new Promise((resolve, reject) => {
-        setTimeout(async_timer_callback, 100, ctx.cache, `results:${ctx.sn}`, resolve, reject, retry + 1, retry);
+        setTimeout(async_timer_callback, 100, ctx.cache, `results:${sn}`, resolve, reject, retry + 1, retry);
     });
 }
 exports.waitingAsync = waitingAsync;

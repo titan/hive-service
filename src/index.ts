@@ -725,8 +725,8 @@ function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) =
   });
 }
 
-export function waiting(ctx: Context, rep: ((result: any) => void), retry: number = 7) {
-  setTimeout(timer_callback, 100, ctx.cache, `results:${ctx.sn}`, rep, retry + 1, retry);
+export function waiting(ctx: Context, rep: ((result: any) => void), sn: string = ctx.sn, retry: number = 7) {
+  setTimeout(timer_callback, 100, ctx.cache, `results:${sn}`, rep, retry + 1, retry);
 }
 
 export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry: number = 7) {
@@ -768,9 +768,9 @@ function async_timer_callback(cache: RedisClient, reply: string, resolve, reject
   });
 }
 
-export function waitingAsync(ctx: Context, retry: number = 7): Promise<any> {
+export function waitingAsync(ctx: Context, sn: string = ctx.sn, retry: number = 7): Promise<any> {
   return new Promise<any>((resolve, reject) => {
-    setTimeout(async_timer_callback, 100, ctx.cache, `results:${ctx.sn}`, resolve, reject, retry + 1, retry);
+    setTimeout(async_timer_callback, 100, ctx.cache, `results:${sn}`, resolve, reject, retry + 1, retry);
   });
 }
 

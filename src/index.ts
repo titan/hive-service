@@ -48,6 +48,15 @@ declare module "redis" {
   }
 }
 
+export interface Context {
+  modname: string;
+  domain: string;
+  uid: string;
+  sn: string;
+  cache: RedisClient;
+  report: (level: number, error: Error) => void;
+}
+
 export interface CmdPacket {
   domain?: string;
   uid?: string;
@@ -58,15 +67,10 @@ export interface CmdPacket {
 
 export type Permission = [string, boolean];
 
-export interface ServerContext {
-  domain: string;
+export interface ServerContext extends Context {
   ip: string;
-  uid: string;
-  cache: RedisClient;
   publish: ((pkg: CmdPacket) => void);
   push: (queuename: string, data: any, qsn?: string) => void;
-  report: (level: number, error: Error) => void;
-  sn: string;
 }
 
 export interface ServerFunction {
@@ -93,7 +97,6 @@ function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void))
 }
 
 export class Server {
-  modname: string;
   queueaddr: string;
   rep: Socket;
   pub: Socket;
@@ -111,7 +114,6 @@ export class Server {
   }
 
   public init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void {
-    this.modname = modname;
     this.queueaddr = queueaddr;
     this.rep = socket("rep");
     this.rep.bind(serveraddr);
@@ -133,19 +135,14 @@ export class Server {
         const pkt = data.pkt;
         const sn = data.sn;
         const ctx: ServerContext = {
-          domain: undefined,
-          ip: undefined,
-          uid: undefined,
-          cache: undefined,
+          ... pkt.ctx,
+          modname,
+          cache,
           publish: undefined,
           push: undefined,
           report: undefined,
           sn,
         };
-        for (const key in pkt.ctx /* Domain, IP, User */) {
-          ctx[key] = pkt.ctx[key];
-        }
-        ctx.cache = cache;
         const fun: string = pkt.fun;
         const args: any[] = pkt.args;
         if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
@@ -174,7 +171,7 @@ export class Server {
           ctx.report = _self.queue ?
             (level: number, error: Error) => {
             const payload = {
-              module: _self.modname,
+              module: modname,
               function: fun,
               level,
               error
@@ -260,17 +257,11 @@ function report_processor_error(ctx: ProcessorContext, fun: string, level: numbe
   }
 }
 
-export interface ProcessorContext {
-  modname: string;
+export interface ProcessorContext extends Context {
   db: PGClient;
-  cache: RedisClient;
   queue?: Disq;
   publish: ((pkg: CmdPacket) => void);
   push: (queuename: string, data: any, qsn?: string) => void;
-  report: (level: number, error: Error) => void;
-  domain: string;
-  uid: string; // caller
-  sn: string;
   logerror: Function;
 }
 
@@ -371,7 +362,7 @@ export class Processor {
               report: queue ?
               (level: number, error: Error) => {
                 const payload = {
-                  module: _self.modname,
+                  module: modname,
                   function: pkt.cmd,
                   level,
                   error
@@ -457,19 +448,14 @@ export interface BusinessEventPacket {
   data: any;
 }
 
-export interface BusinessEventContext {
+export interface BusinessEventContext extends Context {
   pool: Pool;
-  cache: RedisClient;
   queue: Disq;
   queuename: string;
   handler: BusinessEventHandlerFunction;
-  report: (level: number, error: Error) => void;
-  modname: string;
   loginfo: Function;
   logerror: Function;
   db?: PGClient;
-  domain?: string;
-  uid?: string;
 }
 
 export interface BusinessEventHandlerFunction {
@@ -606,6 +592,7 @@ export class BusinessEventListener {
       db: undefined,
       domain: undefined,
       uid: undefined,
+      sn: undefined,
     };
     setTimeout(on_event_timer, 1000, ctx);
   }
@@ -738,7 +725,7 @@ function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) =
   });
 }
 
-export function waiting(ctx: ServerContext, rep: ((result: any) => void), retry: number = 7) {
+export function waiting(ctx: Context, rep: ((result: any) => void), retry: number = 7) {
   setTimeout(timer_callback, 100, ctx.cache, `results:${ctx.sn}`, rep, retry + 1, retry);
 }
 
@@ -781,7 +768,7 @@ function async_timer_callback(cache: RedisClient, reply: string, resolve, reject
   });
 }
 
-export function waitingAsync(ctx: ServerContext, retry: number = 7): Promise<any> {
+export function waitingAsync(ctx: Context, retry: number = 7): Promise<any> {
   return new Promise<any>((resolve, reject) => {
     setTimeout(async_timer_callback, 100, ctx.cache, `results:${ctx.sn}`, resolve, reject, retry + 1, retry);
   });

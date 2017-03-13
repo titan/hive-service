@@ -42,6 +42,14 @@ declare module "redis" {
         execAsync(): Promise<any>;
     }
 }
+export interface Context {
+    modname: string;
+    domain: string;
+    uid: string;
+    sn: string;
+    cache: RedisClient;
+    report: (level: number, error: Error) => void;
+}
 export interface CmdPacket {
     domain?: string;
     uid?: string;
@@ -50,15 +58,10 @@ export interface CmdPacket {
     args: any[];
 }
 export declare type Permission = [string, boolean];
-export interface ServerContext {
-    domain: string;
+export interface ServerContext extends Context {
     ip: string;
-    uid: string;
-    cache: RedisClient;
     publish: ((pkg: CmdPacket) => void);
     push: (queuename: string, data: any, qsn?: string) => void;
-    report: (level: number, error: Error) => void;
-    sn: string;
 }
 export interface ServerFunction {
     (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
@@ -67,7 +70,6 @@ export interface AsyncServerFunction {
     (ctx: ServerContext, ...rest: any[]): Promise<any>;
 }
 export declare class Server {
-    modname: string;
     queueaddr: string;
     rep: Socket;
     pub: Socket;
@@ -82,17 +84,11 @@ export declare class Server {
     call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void;
     callAsync(fun: string, permissions: Permission[], name: string, description: string, impl: AsyncServerFunction): void;
 }
-export interface ProcessorContext {
-    modname: string;
+export interface ProcessorContext extends Context {
     db: PGClient;
-    cache: RedisClient;
     queue?: Disq;
     publish: ((pkg: CmdPacket) => void);
     push: (queuename: string, data: any, qsn?: string) => void;
-    report: (level: number, error: Error) => void;
-    domain: string;
-    uid: string;
-    sn: string;
     logerror: Function;
 }
 export interface ProcessorFunction {
@@ -122,19 +118,14 @@ export interface BusinessEventPacket {
     sn: string;
     data: any;
 }
-export interface BusinessEventContext {
+export interface BusinessEventContext extends Context {
     pool: Pool;
-    cache: RedisClient;
     queue: Disq;
     queuename: string;
     handler: BusinessEventHandlerFunction;
-    report: (level: number, error: Error) => void;
-    modname: string;
     loginfo: Function;
     logerror: Function;
     db?: PGClient;
-    domain?: string;
-    uid?: string;
 }
 export interface BusinessEventHandlerFunction {
     (ctx: BusinessEventContext, data: any): Promise<any>;
@@ -175,10 +166,10 @@ export declare class Service {
 }
 export declare function fib(n: number): number;
 export declare function fiball(n: number): number;
-export declare function waiting(ctx: ServerContext, rep: ((result: any) => void), retry?: number): void;
+export declare function waiting(ctx: Context, rep: ((result: any) => void), retry?: number): void;
 export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry?: number): void;
 export declare function set_for_response(cache: RedisClient, key: string, value: any, timeout?: number): Promise<any>;
-export declare function waitingAsync(ctx: ServerContext, retry?: number): Promise<any>;
+export declare function waitingAsync(ctx: Context, retry?: number): Promise<any>;
 export declare function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: any) => void), fun: string, ...args: any[]): void;
 export declare function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T>;
 export interface Paging<T> {

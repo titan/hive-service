@@ -1,12 +1,5 @@
 "use strict";
-var __assign = (this && this.__assign) || Object.assign || function(t) {
-    for (var s, i = 1, n = arguments.length; i < n; i++) {
-        s = arguments[i];
-        for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
-            t[p] = s[p];
-    }
-    return t;
-};
+Object.defineProperty(exports, "__esModule", { value: true });
 const msgpack = require("msgpack-lite");
 const crypto = require("crypto");
 const nanomsg_1 = require("nanomsg");
@@ -39,7 +32,6 @@ class Server {
         this.permissions = new Map();
     }
     init(modname, serveraddr, queueaddr, cache, loginfo, logerror, queue) {
-        this.modname = modname;
         this.queueaddr = queueaddr;
         this.rep = nanomsg_1.socket("rep");
         this.rep.bind(serveraddr);
@@ -58,25 +50,13 @@ class Server {
                 const data = msgpack.decode(buf);
                 const pkt = data.pkt;
                 const sn = data.sn;
-                const ctx = {
-                    domain: undefined,
-                    ip: undefined,
-                    uid: undefined,
-                    cache: undefined,
-                    publish: undefined,
-                    push: undefined,
-                    report: undefined,
-                    sn,
-                };
-                for (const key in pkt.ctx) {
-                    ctx[key] = pkt.ctx[key];
-                }
-                ctx.cache = cache;
+                const ctx = Object.assign({}, pkt.ctx, { modname,
+                    cache, publish: undefined, push: undefined, report: undefined, sn });
                 const fun = pkt.fun;
                 const args = pkt.args;
                 if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
                     const [asynced, impl] = _self.functions.get(fun);
-                    ctx.publish = (pkt) => _self.pub.send(msgpack.encode(__assign({}, pkt, { sn, domain: ctx.domain, uid: ctx.uid })));
+                    ctx.publish = (pkt) => _self.pub.send(msgpack.encode(Object.assign({}, pkt, { sn, domain: ctx.domain, uid: ctx.uid })));
                     ctx.push = (queuename, data, qsn) => {
                         const event = {
                             sn: qsn || sn,
@@ -101,7 +81,7 @@ class Server {
                     ctx.report = _self.queue ?
                         (level, error) => {
                             const payload = {
-                                module: _self.modname,
+                                module: modname,
                                 function: fun,
                                 level,
                                 error
@@ -270,7 +250,7 @@ class Processor {
                             report: queue ?
                                 (level, error) => {
                                     const payload = {
-                                        module: _self.modname,
+                                        module: modname,
                                         function: pkt.cmd,
                                         level,
                                         error
@@ -487,6 +467,7 @@ class BusinessEventListener {
             db: undefined,
             domain: undefined,
             uid: undefined,
+            sn: undefined,
         };
         setTimeout(on_event_timer, 1000, ctx);
     }
@@ -527,7 +508,7 @@ class Service {
             max: 2 * this.processors.length,
             idleTimeoutMillis: 30000,
         };
-        const pool = new pg_1.Pool(this.config.loginfo ? __assign({}, dbconfig, { log: this.config.loginfo }) : dbconfig);
+        const pool = new pg_1.Pool(this.config.loginfo ? Object.assign({}, dbconfig, { log: this.config.loginfo }) : dbconfig);
         if (this.config.queuehost) {
             const port = this.config.queueport ? this.config.queueport : 7711;
             const queue = new hive_disque_1.Disq({ nodes: [`${this.config.queuehost}:${port}`] });

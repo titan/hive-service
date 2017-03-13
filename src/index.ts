@@ -266,6 +266,7 @@ export interface ProcessorContext {
   cache: RedisClient;
   queue?: Disq;
   publish: ((pkg: CmdPacket) => void);
+  push: (queuename: string, data: any, qsn?: string) => void;
   report: (level: number, error: Error) => void;
   domain: string;
   uid: string; // caller
@@ -332,6 +333,7 @@ export class Processor {
               uid: null,
               sn: null,
               publish: null,
+              push: null,
               report: null,
               logerror: null,
             };
@@ -346,6 +348,26 @@ export class Processor {
               sn: pkt.sn,
               queue,
               publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+              push: (queuename: string, data: any, qsn?: string) => {
+                const event = {
+                  sn: qsn || pkt.sn,
+                  data,
+                  domain: ctx.domain,
+                  uid: ctx.uid
+                };
+                if (_self.queue) {
+                  msgpack_encode(event, (e: Error, pkt: Buffer) => {
+                    if (e) {
+                      logerror(e);
+                    } else {
+                      _self.queue.addjob(queuename, pkt, { retry: 0 }, () => {
+                      }, (e: Error) => {
+                        logerror(e);
+                      });
+                    }
+                  });
+                }
+              },
               report: queue ?
               (level: number, error: Error) => {
                 const payload = {

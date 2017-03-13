@@ -88,6 +88,7 @@ export interface ProcessorContext {
     cache: RedisClient;
     queue?: Disq;
     publish: ((pkg: CmdPacket) => void);
+    push: (queuename: string, data: any, qsn?: string) => void;
     report: (level: number, error: Error) => void;
     domain: string;
     uid: string;

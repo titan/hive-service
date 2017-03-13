@@ -230,6 +230,7 @@ class Processor {
                             uid: null,
                             sn: null,
                             publish: null,
+                            push: null,
                             report: null,
                             logerror: null,
                         };
@@ -245,6 +246,27 @@ class Processor {
                             sn: pkt.sn,
                             queue,
                             publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+                            push: (queuename, data, qsn) => {
+                                const event = {
+                                    sn: qsn || pkt.sn,
+                                    data,
+                                    domain: ctx.domain,
+                                    uid: ctx.uid
+                                };
+                                if (_self.queue) {
+                                    msgpack_encode(event, (e, pkt) => {
+                                        if (e) {
+                                            logerror(e);
+                                        }
+                                        else {
+                                            _self.queue.addjob(queuename, pkt, { retry: 0 }, () => {
+                                            }, (e) => {
+                                                logerror(e);
+                                            });
+                                        }
+                                    });
+                                }
+                            },
                             report: queue ?
                                 (level, error) => {
                                     const payload = {

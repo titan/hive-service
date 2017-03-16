@@ -51,6 +51,12 @@ export interface Context {
     cache: RedisClient;
     report: (level: number, error: Error) => void;
 }
+export interface ErrorPacket {
+    module: string;
+    function: string;
+    level: number;
+    error: Error;
+}
 export interface CmdPacket {
     domain?: string;
     uid?: string;

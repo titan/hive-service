@@ -10,6 +10,7 @@ const zlib = require("zlib");
 const pg_1 = require("pg");
 const redis_1 = require("redis");
 const hive_disque_1 = require("hive-disque");
+;
 function server_msgpack(sn, obj, callback) {
     const payload = msgpack.encode(obj);
     if (payload.length > 1024) {

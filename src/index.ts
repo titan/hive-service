@@ -58,6 +58,13 @@ export interface Context {
   report: (level: number, error: Error) => void;
 }
 
+export interface ErrorPacket {
+  module: string;
+  function: string;
+  level: number;
+  error: Error;
+};
+
 export interface CmdPacket {
   domain?: string;
   uid?: string;
@@ -171,7 +178,7 @@ export class Server {
           };
           ctx.report = _self.queue ?
             (level: number, error: Error) => {
-            const payload = {
+            const payload: ErrorPacket = {
               module: modname,
               function: fun,
               level,
@@ -243,7 +250,7 @@ export class Server {
 
 function report_processor_error(ctx: ProcessorContext, fun: string, level: number, e: Error) {
   ctx.logerror(e);
-  const payload = {
+  const payload: ErrorPacket = {
     module: ctx.modname,
     function: fun,
     level: 0,
@@ -362,7 +369,7 @@ export class Processor {
               },
               report: queue ?
               (level: number, error: Error) => {
-                const payload = {
+                const payload: ErrorPacket = {
                   module: modname,
                   function: pkt.cmd,
                   level,
@@ -465,7 +472,7 @@ export interface BusinessEventHandlerFunction {
 
 function report_timer_error(ctx: BusinessEventContext, fun: string, level: number, e: Error) {
   ctx.logerror(e);
-  const payload = {
+  const payload: ErrorPacket = {
     module: ctx.modname,
     function: "on_event_timer",
     level: 0,
@@ -576,7 +583,7 @@ export class BusinessEventListener {
       queuename: this.queuename,
       handler: this.handler,
       report: (level: number, error: Error) => {
-        const payload = {
+        const payload: ErrorPacket = {
           module: modname,
           function: this.queuename,
           level,

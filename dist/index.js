@@ -88,7 +88,7 @@ class Server {
                                 error
                             };
                             const pkt = msgpack.encode(payload);
-                            _self.queue.addjob("hive-errors", pkt, () => { }, (e) => {
+                            _self.queue.addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
                                 logerror(e);
                             });
                         } :
@@ -164,7 +164,7 @@ function report_processor_error(ctx, fun, level, e) {
     };
     const pkt = msgpack.encode(payload);
     if (ctx.queue) {
-        ctx.queue.addjob("hive-errors", pkt, () => {
+        ctx.queue.addjob("hive-errors", pkt, { retry: 0 }, () => {
         }, (e) => {
             ctx.logerror(e);
         });
@@ -257,7 +257,7 @@ class Processor {
                                         error
                                     };
                                     const epkt = msgpack.encode(payload);
-                                    queue.addjob("hive-errors", epkt, () => { }, (e) => {
+                                    queue.addjob("hive-errors", epkt, { retry: 0 }, () => { }, (e) => {
                                         logerror(e);
                                     });
                                 } :
@@ -342,7 +342,7 @@ function report_timer_error(ctx, fun, level, e) {
         error: e,
     };
     const pkt = msgpack.encode(payload);
-    ctx.queue.addjob("hive-errors", pkt, () => {
+    ctx.queue.addjob("hive-errors", pkt, { retry: 0 }, () => {
         setTimeout(on_event_timer, 1000, ctx);
     }, (e) => {
         ctx.logerror(e);
@@ -458,7 +458,7 @@ class BusinessEventListener {
                     error
                 };
                 const pkt = msgpack.encode(payload);
-                queue.addjob("hive-errors", pkt, () => { }, (e) => {
+                queue.addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
                     logerror(e);
                 });
             },

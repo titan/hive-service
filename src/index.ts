@@ -24,6 +24,7 @@ declare module "redis" {
     hvalsAsync(key: string): Promise<any>;
     incrAsync(key: string): Promise<any>;
     incrbyAsync(key: string, increment: number): Promise<any>;
+    keysAsync(key: string): Promise<any>;
     lindexAsync(key: string, index: number): Promise<any>;
     llenAsync(key: string): Promise<any>;
     lpopAsync(key: string): Promise<any>;

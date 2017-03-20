@@ -37,6 +37,7 @@ declare module "redis" {
     setAsync(key: string, value: string | number | Buffer): Promise<any>;
     setexAsync(key: string, ttl: number, value: string | number | Buffer): Promise<any>;
     sismemberAsync(key: string, value: string | Buffer): Promise<any>;
+    smembersAsync(key: string): Promise<any>;
     zaddAsync(key: string, score: number, member: string | number | Buffer): Promise<any>;
     zcountAsync(key: string, min: string | number, max: string | number): Promise<any>;
     zrangeAsync(key: string, start: number, stop: number): Promise<any>;

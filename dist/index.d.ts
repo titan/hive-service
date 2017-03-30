@@ -58,6 +58,7 @@ export interface ErrorPacket {
     function: string;
     level: number;
     error: Error;
+    args?: any[];
 }
 export interface CmdPacket {
     domain?: string;

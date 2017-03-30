@@ -63,7 +63,7 @@ class Server {
                             sn: qsn || sn,
                             data,
                             domain: ctx.domain,
-                            uid: ctx.uid
+                            uid: ctx.uid,
                         };
                         if (_self.queue) {
                             msgpack_encode(event, (e, pkt) => {
@@ -79,31 +79,29 @@ class Server {
                             });
                         }
                     };
-                    ctx.report = _self.queue ?
-                        (level, error) => {
-                            const payload = {
-                                module: modname,
-                                function: fun,
-                                level,
-                                error
-                            };
-                            const pkt = msgpack.encode(payload);
-                            _self.queue.addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
-                                logerror(e);
-                            });
-                        } :
-                        (level, error) => {
+                    ctx.report = _self.queue ? (level, error) => {
+                        const payload = {
+                            module: modname,
+                            function: fun,
+                            level,
+                            error,
+                            args,
                         };
+                        const pkt = msgpack.encode(payload);
+                        _self.queue.addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
+                            logerror(e);
+                        });
+                    } : (level, error) => {
+                    };
+                    loginfo(`onCall ${modname}.${fun} ${JSON.stringify(args)} with sn ${sn}`);
                     if (!asynced) {
                         const func = impl;
                         try {
-                            args ?
-                                func(ctx, (result) => {
-                                    server_msgpack(sn, result, (buf) => { sock.send(buf); });
-                                }, ...args) :
-                                func(ctx, (result) => {
-                                    server_msgpack(sn, result, (buf) => { sock.send(buf); });
-                                });
+                            args ? func(ctx, (result) => {
+                                server_msgpack(sn, result, (buf) => { sock.send(buf); });
+                            }, ...args) : func(ctx, (result) => {
+                                server_msgpack(sn, result, (buf) => { sock.send(buf); });
+                            });
                         }
                         catch (e) {
                             logerror(e);
@@ -125,6 +123,7 @@ class Server {
                             server_msgpack(sn, result, (buf) => { sock.send(buf); });
                         }).catch(e => {
                             logerror(e);
+                            ctx.report(0, e);
                             const payload = msgpack.encode({ code: 500, msg: e.message });
                             msgpack_encode({ sn, payload }, (e, pkt) => {
                                 if (e) {
@@ -154,13 +153,14 @@ class Server {
     }
 }
 exports.Server = Server;
-function report_processor_error(ctx, fun, level, e) {
+function report_processor_error(ctx, fun, level, e, args) {
     ctx.logerror(e);
     const payload = {
         module: ctx.modname,
         function: fun,
         level: 0,
         error: e,
+        args,
     };
     const pkt = msgpack.encode(payload);
     if (ctx.queue) {
@@ -232,7 +232,7 @@ class Processor {
                                     sn: qsn || pkt.sn,
                                     data,
                                     domain: ctx.domain,
-                                    uid: ctx.uid
+                                    uid: ctx.uid,
                                 };
                                 if (_self.queue) {
                                     msgpack_encode(event, (e, pkt) => {
@@ -248,22 +248,20 @@ class Processor {
                                     });
                                 }
                             },
-                            report: queue ?
-                                (level, error) => {
-                                    const payload = {
-                                        module: modname,
-                                        function: pkt.cmd,
-                                        level,
-                                        error
-                                    };
-                                    const epkt = msgpack.encode(payload);
-                                    queue.addjob("hive-errors", epkt, { retry: 0 }, () => { }, (e) => {
-                                        logerror(e);
-                                    });
-                                } :
-                                (level, error) => {
-                                    logerror(error);
-                                },
+                            report: queue ? (level, error) => {
+                                const payload = {
+                                    module: modname,
+                                    function: pkt.cmd,
+                                    level,
+                                    error,
+                                };
+                                const epkt = msgpack.encode(payload);
+                                queue.addjob("hive-errors", epkt, { retry: 0 }, () => { }, (e) => {
+                                    logerror(e);
+                                });
+                            } : (level, error) => {
+                                logerror(error);
+                            },
                             logerror,
                         };
                         if (!asynced) {
@@ -272,7 +270,7 @@ class Processor {
                                 pkt.args ? func(ctx, ...pkt.args) : func(ctx);
                             }
                             catch (e) {
-                                report_processor_error(ctx, pkt.cmd, 0, e);
+                                report_processor_error(ctx, pkt.cmd, 0, e, pkt.args);
                             }
                             finally {
                                 done();
@@ -299,7 +297,7 @@ class Processor {
                                 }
                             }).catch(e => {
                                 done();
-                                report_processor_error(ctx, pkt.cmd, 0, e);
+                                report_processor_error(ctx, pkt.cmd, 0, e, pkt.args);
                                 msgpack_encode({ code: 500, msg: e.message }, (e, buf) => {
                                     if (e) {
                                         report_processor_error(ctx, "processor/asyncfunc-catch/msgpack_encode", 0, e);
@@ -333,20 +331,20 @@ class Processor {
     }
 }
 exports.Processor = Processor;
-function report_timer_error(ctx, fun, level, e) {
+function report_timer_error(ctx, fun, level, e, callback) {
     ctx.logerror(e);
     const payload = {
         module: ctx.modname,
-        function: "on_event_timer",
+        function: fun,
         level: 0,
         error: e,
     };
     const pkt = msgpack.encode(payload);
     ctx.queue.addjob("hive-errors", pkt, { retry: 0 }, () => {
-        setTimeout(on_event_timer, 1000, ctx);
+        callback();
     }, (e) => {
         ctx.logerror(e);
-        setTimeout(on_event_timer, 1000, ctx);
+        callback();
     });
 }
 function on_event_timer(ctx) {
@@ -360,12 +358,12 @@ function on_event_timer(ctx) {
             const body = job.body;
             msgpack_decode(body, (e, pkt) => {
                 if (e) {
-                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode", 0, e);
+                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                 }
                 else {
                     ctx.pool.connect((err, db, done) => {
                         if (err) {
-                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect", 0, err);
+                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect", 0, err, () => { setTimeout(on_event_timer, 1000, ctx); });
                         }
                         else {
                             ctx.db = db;
@@ -376,12 +374,12 @@ function on_event_timer(ctx) {
                                 if (result !== undefined) {
                                     msgpack_encode(result, (e, buf) => {
                                         if (e) {
-                                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e);
+                                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                                         }
                                         else {
                                             ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                                 if (e) {
-                                                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e);
+                                                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                                                 }
                                                 else {
                                                     setTimeout(on_event_timer, 0, ctx);
@@ -394,12 +392,12 @@ function on_event_timer(ctx) {
                                     msgpack_encode({ code: 500, msg: `${ctx.modname} 的 BusinessEventHandlerFunction 没有返回结果` }, (e, buf) => {
                                         if (e) {
                                             ctx.logerror(e);
-                                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e);
+                                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                                         }
                                         else {
                                             ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
                                                 if (e) {
-                                                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e);
+                                                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                                                 }
                                                 else {
                                                     setTimeout(on_event_timer, 1000, ctx);
@@ -410,20 +408,23 @@ function on_event_timer(ctx) {
                                 }
                             }).catch(e => {
                                 done();
-                                msgpack_encode({ code: 500, msg: e.message }, (e, buf) => {
-                                    if (e) {
-                                        report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode", 0, e);
-                                    }
-                                    else {
-                                        ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
-                                            if (e) {
-                                                report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode/setex", 0, e);
-                                            }
-                                            else {
-                                                setTimeout(on_event_timer, 1000, ctx);
-                                            }
-                                        });
-                                    }
+                                ctx.logerror(e);
+                                report_timer_error(ctx, "queue: " + ctx.queuename, 0, e, () => {
+                                    msgpack_encode({ code: 500, msg: e.message }, (e, buf) => {
+                                        if (e) {
+                                            report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
+                                        }
+                                        else {
+                                            ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e, _) => {
+                                                if (e) {
+                                                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode/setex", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
+                                                }
+                                                else {
+                                                    setTimeout(on_event_timer, 1000, ctx);
+                                                }
+                                            });
+                                        }
+                                    });
                                 });
                             });
                         }
@@ -436,7 +437,7 @@ function on_event_timer(ctx) {
         }
     }, (e) => {
         ctx.logerror(e);
-        report_timer_error(ctx, "on_event_timer/getjob.error", 0, e);
+        report_timer_error(ctx, "on_event_timer/getjob.error", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
     });
 }
 class BusinessEventListener {
@@ -455,7 +456,7 @@ class BusinessEventListener {
                     module: modname,
                     function: this.queuename,
                     level,
-                    error
+                    error,
                 };
                 const pkt = msgpack.encode(payload);
                 queue.addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
@@ -506,10 +507,10 @@ class Service {
             password: this.config.dbpasswd,
             port: this.config.dbport ? this.config.dbport : 5432,
             min: 1,
-            max: 2 * this.processors.length,
+            max: 2 * (this.processors.length + this.listeners.length),
             idleTimeoutMillis: 30000,
         };
-        const pool = new pg_1.Pool(this.config.loginfo ? Object.assign({}, dbconfig, { log: this.config.loginfo }) : dbconfig);
+        const pool = new pg_1.Pool(dbconfig);
         if (this.config.queuehost) {
             const port = this.config.queueport ? this.config.queueport : 7711;
             const queue = new hive_disque_1.Disq({ nodes: [`${this.config.queuehost}:${port}`] });
@@ -556,14 +557,14 @@ function timer_callback(cache, reply, rep, retry, countdown) {
             }).catch((e) => {
                 rep({
                     code: 540,
-                    msg: e.message
+                    msg: e.message,
                 });
             });
         }
         else if (countdown === 0) {
             rep({
                 code: 504,
-                msg: "Request Timeout"
+                msg: "Request Timeout",
             });
         }
         else {
@@ -631,7 +632,7 @@ function rpc(domain, addr, uid, cb, fun, ...args) {
         ctx: {
             domain: domain,
             ip: ip.address(),
-            uid: uid
+            uid: uid,
         },
         fun: fun,
         args: a
@@ -668,6 +669,9 @@ function rpc(domain, addr, uid, cb, fun, ...args) {
 }
 exports.rpc = rpc;
 function rpcAsync(domain, addr, uid, fun, ...args) {
+    const sn = crypto.randomBytes(64).toString("base64");
+    console.log(`rpcAsync domain: ${domain}, addr: ${addr}, uid: ${uid}, fun: ${fun}, args: ${JSON.stringify(args)}, sn: ${sn}`);
+    const start = new Date().getTime();
     const p = new Promise(function (resolve, reject) {
         let a = [];
         if (args != null) {
@@ -677,15 +681,16 @@ function rpcAsync(domain, addr, uid, fun, ...args) {
             ctx: {
                 domain: domain,
                 ip: ip.address(),
-                uid: uid
+                uid: uid,
             },
             fun: fun,
-            args: a
+            args: a,
         };
-        const sn = crypto.randomBytes(64).toString("base64");
         const req = nanomsg_1.socket("req");
         req.connect(addr);
         req.on("data", (msg) => {
+            const stop = new Date().getTime();
+            console.log(`rpcAsync onData, domain: ${domain}, addr: ${addr}, uid: ${uid}, fun: ${fun}, args: ${JSON.stringify(args)}, sn: ${sn}, done in ${stop - start} milliseconds`);
             const data = msgpack.decode(msg);
             if (sn === data["sn"]) {
                 if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {

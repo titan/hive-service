@@ -65,6 +65,7 @@ export interface ErrorPacket {
   function: string;
   level: number;
   error: Error;
+  args?: any[];
 };
 
 export interface CmdPacket {
@@ -163,7 +164,7 @@ export class Server {
               sn: qsn || sn,
               data,
               domain: ctx.domain,
-              uid: ctx.uid
+              uid: ctx.uid,
             };
             if (_self.queue) {
               msgpack_encode(event, (e: Error, pkt: Buffer) => {
@@ -178,29 +179,27 @@ export class Server {
               });
             }
           };
-          ctx.report = _self.queue ?
-            (level: number, error: Error) => {
+          ctx.report = _self.queue ? (level: number, error: Error) => {
             const payload: ErrorPacket = {
               module: modname,
               function: fun,
               level,
-              error
+              error,
+              args,
             };
             const pkt = msgpack.encode(payload);
             _self.queue.addjob("hive-errors", pkt, { retry: 0 }, () => {}, (e: Error) => {
               logerror(e);
             });
-          } :
-            (level: number, error: Error) => {
+          } : (level: number, error: Error) => {
           };
+          loginfo(`onCall ${modname}.${fun} ${JSON.stringify(args)} with sn ${sn}`);
           if (!asynced) {
             const func = impl as ServerFunction;
             try {
-              args ?
-                func(ctx, (result: any) => {
+              args ? func(ctx, (result: any) => {
                 server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
-              }, ...args) :
-                func(ctx, (result: any) => {
+              }, ...args) : func(ctx, (result: any) => {
                 server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
               });
             } catch (e) {
@@ -221,6 +220,7 @@ export class Server {
               server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
             }).catch(e => {
               logerror(e);
+              ctx.report(0, e);
               const payload = msgpack.encode({ code: 500, msg: e.message });
               msgpack_encode({ sn, payload }, (e: Error, pkt: Buffer) => {
                 if (e) {
@@ -250,13 +250,14 @@ export class Server {
   }
 }
 
-function report_processor_error(ctx: ProcessorContext, fun: string, level: number, e: Error) {
+function report_processor_error(ctx: ProcessorContext, fun: string, level: number, e: Error, args?: any[]) {
   ctx.logerror(e);
   const payload: ErrorPacket = {
     module: ctx.modname,
     function: fun,
     level: 0,
     error: e,
+    args,
   };
   const pkt = msgpack.encode(payload);
   if (ctx.queue) {
@@ -354,7 +355,7 @@ export class Processor {
                   sn: qsn || pkt.sn,
                   data,
                   domain: ctx.domain,
-                  uid: ctx.uid
+                  uid: ctx.uid,
                 };
                 if (_self.queue) {
                   msgpack_encode(event, (e: Error, pkt: Buffer) => {
@@ -369,20 +370,18 @@ export class Processor {
                   });
                 }
               },
-              report: queue ?
-              (level: number, error: Error) => {
+              report: queue ?  (level: number, error: Error) => {
                 const payload: ErrorPacket = {
                   module: modname,
                   function: pkt.cmd,
                   level,
-                  error
+                  error,
                 };
                 const epkt = msgpack.encode(payload);
                 queue.addjob("hive-errors", epkt, { retry: 0 }, () => {}, (e: Error) => {
                   logerror(e);
                 });
-              } :
-              (level: number, error: Error) => {
+              } : (level: number, error: Error) => {
                 logerror(error);
               },
               logerror,
@@ -392,7 +391,7 @@ export class Processor {
               try {
                 pkt.args ? func(ctx, ...pkt.args) : func(ctx);
               } catch (e) {
-                report_processor_error(ctx, pkt.cmd, 0, e);
+                report_processor_error(ctx, pkt.cmd, 0, e, pkt.args);
               } finally {
                 done();
               }
@@ -416,7 +415,7 @@ export class Processor {
                 }
               }).catch(e => {
                 done();
-                report_processor_error(ctx, pkt.cmd, 0, e);
+                report_processor_error(ctx, pkt.cmd, 0, e, pkt.args);
                 msgpack_encode({ code: 500, msg: e.message }, (e: Error, buf: Buffer) => {
                   if (e) {
                     report_processor_error(ctx, "processor/asyncfunc-catch/msgpack_encode", 0, e);
@@ -472,20 +471,20 @@ export interface BusinessEventHandlerFunction {
   (ctx: BusinessEventContext, data: any): Promise<any>;
 }
 
-function report_timer_error(ctx: BusinessEventContext, fun: string, level: number, e: Error) {
+function report_timer_error(ctx: BusinessEventContext, fun: string, level: number, e: Error, callback: (() => void)) {
   ctx.logerror(e);
   const payload: ErrorPacket = {
     module: ctx.modname,
-    function: "on_event_timer",
+    function: fun,
     level: 0,
     error: e,
   };
   const pkt = msgpack.encode(payload);
   ctx.queue.addjob("hive-errors", pkt, { retry: 0 }, () => {
-    setTimeout(on_event_timer, 1000, ctx);
+    callback();
   }, (e: Error) => {
     ctx.logerror(e);
-    setTimeout(on_event_timer, 1000, ctx);
+    callback();
   });
 }
 
@@ -500,11 +499,11 @@ function on_event_timer(ctx: BusinessEventContext) {
       const body = job.body as Buffer;
       msgpack_decode(body, (e: Error, pkt: BusinessEventPacket) => {
         if (e) {
-          report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode", 0, e);
+          report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
         } else {
           ctx.pool.connect((err: Error, db: PGClient, done: () => void) => {
             if (err) {
-              report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect", 0, err);
+              report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect", 0, err, () => { setTimeout(on_event_timer, 1000, ctx); });
             } else {
               ctx.db = db;
               ctx.domain = pkt.domain;
@@ -514,11 +513,11 @@ function on_event_timer(ctx: BusinessEventContext) {
                 if (result !== undefined) {
                   msgpack_encode(result, (e: Error, buf: Buffer) => {
                     if (e) {
-                      report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e);
+                      report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                     } else {
                       ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                         if (e) {
-                          report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e);
+                          report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                         } else {
                           setTimeout(on_event_timer, 0, ctx);
                         }
@@ -529,11 +528,11 @@ function on_event_timer(ctx: BusinessEventContext) {
                   msgpack_encode({ code: 500, msg: `${ctx.modname} 的 BusinessEventHandlerFunction 没有返回结果` }, (e: Error, buf: Buffer) => {
                     if (e) {
                       ctx.logerror(e);
-                      report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e);
+                      report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                     } else {
                       ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
                         if (e) {
-                          report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e);
+                          report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.then/msgpack_encode/setex", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
                         } else {
                           setTimeout(on_event_timer, 1000, ctx);
                         }
@@ -543,18 +542,21 @@ function on_event_timer(ctx: BusinessEventContext) {
                 }
               }).catch(e => {
                 done();
-                msgpack_encode({ code: 500, msg: e.message }, (e: Error, buf: Buffer) => {
-                  if (e) {
-                    report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode", 0, e);
-                  } else {
-                    ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
-                      if (e) {
-                        report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode/setex", 0, e);
-                      } else {
-                        setTimeout(on_event_timer, 1000, ctx);
-                      }
-                    });
-                  }
+                ctx.logerror(e);
+                report_timer_error(ctx, "queue: " + ctx.queuename, 0, e, () => {
+                  msgpack_encode({ code: 500, msg: e.message }, (e: Error, buf: Buffer) => {
+                    if (e) {
+                      report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
+                    } else {
+                      ctx.cache.setex(`results:${pkt.sn}`, 600, buf, (e: Error, _: any) => {
+                        if (e) {
+                          report_timer_error(ctx, "on_event_timer/getjob/msgpack_decode/connect/handle.catch/msgpack_encode/setex", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
+                        } else {
+                          setTimeout(on_event_timer, 1000, ctx);
+                        }
+                      });
+                    }
+                  });
                 });
               });
             }
@@ -566,7 +568,7 @@ function on_event_timer(ctx: BusinessEventContext) {
     }
   }, (e: Error) => {
     ctx.logerror(e);
-    report_timer_error(ctx, "on_event_timer/getjob.error", 0, e);
+    report_timer_error(ctx, "on_event_timer/getjob.error", 0, e, () => { setTimeout(on_event_timer, 1000, ctx); });
   });
 }
 
@@ -589,7 +591,7 @@ export class BusinessEventListener {
           module: modname,
           function: this.queuename,
           level,
-          error
+          error,
         };
         const pkt = msgpack.encode(payload);
         queue.addjob("hive-errors", pkt, { retry: 0 }, () => {}, (e: Error) => {
@@ -668,10 +670,10 @@ export class Service {
       password: this.config.dbpasswd,
       port: this.config.dbport ? this.config.dbport : 5432,
       min: 1, // min number of clients in the pool
-      max: 2 * this.processors.length, // max number of clients in the pool
+      max: 2 * (this.processors.length + this.listeners.length), // max number of clients in the pool
       idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
     };
-    const pool = new Pool(this.config.loginfo ? { ...dbconfig, log: this.config.loginfo } : dbconfig);
+    const pool = new Pool(dbconfig);
 
     if (this.config.queuehost) {
       const port = this.config.queueport ? this.config.queueport : 7711;
@@ -721,13 +723,13 @@ function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) =
       }).catch((e: Error) => {
         rep({
           code: 540,
-          msg: e.message
+          msg: e.message,
         });
       });
     } else if (countdown === 0) {
       rep({
         code: 504,
-        msg: "Request Timeout"
+        msg: "Request Timeout",
       });
     } else {
       setTimeout(timer_callback, fib(retry - countdown) * 1000, cache, reply, rep, retry, countdown - 1);
@@ -793,7 +795,7 @@ export function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, r
     ctx: {
       domain: domain,
       ip:     ip.address(),
-      uid:    uid
+      uid:    uid,
     },
     fun: fun,
     args: a
@@ -827,6 +829,9 @@ export function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, r
 }
 
 export function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T> {
+  const sn = crypto.randomBytes(64).toString("base64");
+  console.log(`rpcAsync domain: ${domain}, addr: ${addr}, uid: ${uid}, fun: ${fun}, args: ${JSON.stringify(args)}, sn: ${sn}`);
+  const start = new Date().getTime();
   const p = new Promise<T>(function (resolve, reject) {
     let a = [];
     if (args != null) {
@@ -836,15 +841,16 @@ export function rpcAsync<T>(domain: string, addr: string, uid: string, fun: stri
       ctx: {
         domain: domain,
         ip:     ip.address(),
-        uid:    uid
+        uid:    uid,
       },
       fun: fun,
-      args: a
+      args: a,
     };
-    const sn = crypto.randomBytes(64).toString("base64");
     const req = socket("req");
     req.connect(addr);
     req.on("data", (msg) => {
+      const stop = new Date().getTime();
+      console.log(`rpcAsync onData, domain: ${domain}, addr: ${addr}, uid: ${uid}, fun: ${fun}, args: ${JSON.stringify(args)}, sn: ${sn}, done in ${stop - start} milliseconds`);
       const data: Object = msgpack.decode(msg);
       if (sn === data["sn"]) {
         if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {

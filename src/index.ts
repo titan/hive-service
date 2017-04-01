@@ -8,6 +8,7 @@ import * as zlib from "zlib";
 import { Pool, Client as PGClient } from "pg";
 import { createClient, RedisClient, Multi } from "redis";
 import { Disq } from "hive-disque";
+import * as http from "http";
 
 declare module "redis" {
   export interface RedisClient extends NodeJS.EventEmitter {
@@ -68,6 +69,13 @@ export interface ErrorPacket {
   args?: any[];
 };
 
+export interface Result<T> {
+  code: number;
+  data?: T;
+  msg?: string;
+  now?: Date;
+}
+
 export interface CmdPacket {
   domain?: string;
   uid?: string;
@@ -85,11 +93,21 @@ export interface ServerContext extends Context {
 }
 
 export interface ServerFunction {
-  (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
+  (ctx: ServerContext, rep: ((result: Result<any>) => void), ...rest: any[]): void;
 }
 
 export interface AsyncServerFunction {
-  (ctx: ServerContext, ...rest: any[]): Promise<any>;
+  (ctx: ServerContext, ...rest: any[]): Promise<Result<any>>;
+}
+
+function get_response_addresses(addr: string) {
+  const lastnumber = parseInt(addr[addr.length - 1]);
+  const prefix = addr.substr(0, addr.length - 1);
+  const addresses = [];
+  for (let i = 0; i < 2; i ++) {
+    addresses.push(prefix + (lastnumber + i).toString());
+  }
+  return addresses;
 }
 
 function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void)) {
@@ -109,9 +127,7 @@ function server_msgpack(sn: string, obj: any, callback: ((buf: Buffer) => void))
 
 export class Server {
   queueaddr: string;
-  rep: Socket;
   pub: Socket;
-  pair: Socket;
   queue: Disq;
   loginfo: Function;
   logerror: Function;
@@ -126,22 +142,15 @@ export class Server {
 
   public init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void {
     this.queueaddr = queueaddr;
-    this.rep = socket("rep");
-    this.rep.bind(serveraddr);
-    this.pub = socket("pub");
-    this.pub.bind(this.queueaddr);
-    const lastnumber = parseInt(serveraddr[serveraddr.length - 1]) + 1;
-    const newaddr = serveraddr.substr(0, serveraddr.length - 1) + lastnumber.toString();
-    this.pair = socket("pair");
-    this.pair.bind(newaddr);
+    if (this.queueaddr) {
+      this.pub = socket("pub");
+      this.pub.bind(this.queueaddr);
+    }
     this.queue = queue;
     this.loginfo = loginfo;
     this.logerror = logerror;
-
-    const _self = this;
-
-    for (const sock of [this.pair, this.rep]) {
-      sock.on("data", function (buf: NodeBuffer) {
+    for (const sock of get_response_addresses(serveraddr).map(x => { loginfo(x); const pair = socket("pair"); pair.bind(x); return pair; })) {
+      sock.on("data", ((buf: NodeBuffer) => {
         const data = msgpack.decode(buf);
         const pkt = data.pkt;
         const sn = data.sn;
@@ -156,9 +165,9 @@ export class Server {
         };
         const fun: string = pkt.fun;
         const args: any[] = pkt.args;
-        if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
-          const [asynced, impl] = _self.functions.get(fun);
-          ctx.publish = (pkt: CmdPacket) => _self.pub.send(msgpack.encode({...pkt, sn, domain: ctx.domain, uid: ctx.uid}));
+        if (this.permissions.has(fun) && this.permissions.get(fun).get(ctx.domain)) {
+          const [asynced, impl] = this.functions.get(fun);
+          ctx.publish = this.pub ? (pkt: CmdPacket) => this.pub.send(msgpack.encode({...pkt, sn, domain: ctx.domain, uid: ctx.uid})) : (pkt: CmdPacket) => { logerror("Publish channel not exists"); };
           ctx.push = (queuename: string, data: any, qsn?: string) => {
             const event = {
               sn: qsn || sn,
@@ -166,12 +175,12 @@ export class Server {
               domain: ctx.domain,
               uid: ctx.uid,
             };
-            if (_self.queue) {
+            if (this.queue) {
               msgpack_encode(event, (e: Error, pkt: Buffer) => {
                 if (e) {
                   logerror(e);
                 } else {
-                  _self.queue.addjob(queuename, pkt, { retry: 0 }, () => {
+                  this.queue.addjob(queuename, pkt, { retry: 0 }, () => {
                   }, (e: Error) => {
                     logerror(e);
                   });
@@ -179,7 +188,7 @@ export class Server {
               });
             }
           };
-          ctx.report = _self.queue ? (level: number, error: Error) => {
+          ctx.report = this.queue ? (level: number, error: Error) => {
             const payload: ErrorPacket = {
               module: modname,
               function: fun,
@@ -188,12 +197,11 @@ export class Server {
               args,
             };
             const pkt = msgpack.encode(payload);
-            _self.queue.addjob("hive-errors", pkt, { retry: 0 }, () => {}, (e: Error) => {
+            this.queue.addjob("hive-errors", pkt, { retry: 0 }, () => {}, (e: Error) => {
               logerror(e);
             });
           } : (level: number, error: Error) => {
           };
-          loginfo(`onCall ${modname}.${fun} ${JSON.stringify(args)} with sn ${sn}`);
           if (!asynced) {
             const func = impl as ServerFunction;
             try {
@@ -221,7 +229,7 @@ export class Server {
             }).catch(e => {
               logerror(e);
               ctx.report(0, e);
-              const payload = msgpack.encode({ code: 500, msg: e.message });
+              const payload = msgpack.encode({ code: 500, msg: e.stack + " func: " + fun});
               msgpack_encode({ sn, payload }, (e: Error, pkt: Buffer) => {
                 if (e) {
                   logerror(e);
@@ -235,7 +243,7 @@ export class Server {
           const payload = msgpack.encode({ code: 403, msg: "Forbidden" });
           sock.send(msgpack.encode({ sn, payload }));
         }
-      });
+      }).bind(this));
     }
   }
 
@@ -281,7 +289,7 @@ export interface ProcessorFunction {
 }
 
 export interface AsyncProcessorFunction {
-  (ctx: ProcessorContext, ...args: any[]): Promise<any>;
+  (ctx: ProcessorContext, ...args: any[]): Promise<Result<any>>;
 }
 
 export class Processor {
@@ -319,11 +327,10 @@ export class Processor {
         subprocessor.init(modname, this.subqueueaddr, pool, cache, loginfo, logerror, queue);
       }
     }
-    const _self = this;
-    this.sock.on("data", (buf: NodeBuffer) => {
+    this.sock.on("data", ((buf: NodeBuffer) => {
       const pkt: CmdPacket = msgpack.decode(buf);
-      if (_self.functions.has(pkt.cmd)) {
-        const [asynced, impl] = _self.functions.get(pkt.cmd);
+      if (this.functions.has(pkt.cmd)) {
+        const [asynced, impl] = this.functions.get(pkt.cmd);
         pool.connect((err: Error, db: PGClient, done: () => void) => {
           if (err) {
             const ctx:  ProcessorContext = {
@@ -349,7 +356,7 @@ export class Processor {
               uid: pkt.uid,
               sn: pkt.sn,
               queue,
-              publish: (pkt: CmdPacket) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+              publish: (pkt: CmdPacket) => this.pub ? this.pub.send(msgpack.encode(pkt)) : undefined,
               push: (queuename: string, data: any, qsn?: string) => {
                 const event = {
                   sn: qsn || pkt.sn,
@@ -357,12 +364,12 @@ export class Processor {
                   domain: ctx.domain,
                   uid: ctx.uid,
                 };
-                if (_self.queue) {
+                if (this.queue) {
                   msgpack_encode(event, (e: Error, pkt: Buffer) => {
                     if (e) {
                       logerror(e);
                     } else {
-                      _self.queue.addjob(queuename, pkt, { retry: 0 }, () => {
+                      this.queue.addjob(queuename, pkt, { retry: 0 }, () => {
                       }, (e: Error) => {
                         logerror(e);
                       });
@@ -434,7 +441,7 @@ export class Processor {
       } else {
         loginfo(pkt.cmd + " not found!");
       }
-    });
+    }).bind(this));
   }
 
   public registerSubProcessor(processor: Processor): void {
@@ -656,11 +663,12 @@ export class Service {
   }
 
   public run(): void {
-    const path = this.config.queueaddr.substring(this.config.queueaddr.indexOf("///") + 2, this.config.queueaddr.length);
-    if (fs.existsSync(path)) {
-      fs.unlinkSync(path); // make nanomsg happy
+    if (this.config.queueaddr) {
+      const path = this.config.queueaddr.substring(this.config.queueaddr.indexOf("///") + 2, this.config.queueaddr.length);
+      if (fs.existsSync(path)) {
+        fs.unlinkSync(path); // make nanomsg happy
+      }
     }
-
     const cache: RedisClient = createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost, { "return_buffers": true });
     const cacheAsync: RedisClient = bluebird.promisifyAll(cache) as RedisClient;
     const dbconfig = {
@@ -737,15 +745,15 @@ function timer_callback(cache: RedisClient, reply: string, rep: ((result: any) =
   });
 }
 
-export function waiting(ctx: Context, rep: ((result: any) => void), sn: string = ctx.sn, retry: number = 7) {
+export function waiting(ctx: Context, rep: ((result: Result<any>) => void), sn: string = ctx.sn, retry: number = 7) {
   setTimeout(timer_callback, 100, ctx.cache, `results:${sn}`, rep, retry + 1, retry);
 }
 
-export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry: number = 7) {
+export function wait_for_response(cache: RedisClient, reply: string, rep: ((result: Result<any>) => void), retry: number = 7) {
   setTimeout(timer_callback, 100, cache, reply, rep, retry + 1, retry);
 }
 
-export function set_for_response(cache: RedisClient, key: string, value: any, timeout: number = 30): Promise<any> {
+export function set_for_response(cache: RedisClient, key: string, value: Result<any>, timeout: number = 30): Promise<any> {
   return new Promise((resolve, reject) => {
     msgpack_encode_async(value).then(buf => {
       cache.setex(key, timeout, buf, (e: Error, _: any) => {
@@ -780,99 +788,106 @@ function async_timer_callback(cache: RedisClient, reply: string, resolve, reject
   });
 }
 
-export function waitingAsync(ctx: Context, sn: string = ctx.sn, retry: number = 7): Promise<any> {
-  return new Promise<any>((resolve, reject) => {
+export function waitingAsync(ctx: Context, sn: string = ctx.sn, retry: number = 7): Promise<Result<any>> {
+  return new Promise<Result<any>>((resolve, reject) => {
     setTimeout(async_timer_callback, 100, ctx.cache, `results:${sn}`, resolve, reject, retry + 1, retry);
   });
 }
 
-export function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: any) => void), fun: string, ...args: any[]) {
-  let a = [];
-  if (args != null) {
-    a = [...args];
-  }
-  const params = {
-    ctx: {
-      domain: domain,
-      ip:     ip.address(),
-      uid:    uid,
+export function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: Result<any>) => void), fun: string, ...args: any[]) {
+  const host = "127.0.0.1";
+  const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
+  const path = "/";
+  const openid = uid;
+  const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
+
+  const data: Buffer = msgpack.encode({
+    "mod": mod[0].toLowerCase(),
+    "fun": fun,
+    "arg": [...args],
+    "ctx": {
+      "wxuser": openid,
     },
-    fun: fun,
-    args: a
-  };
-  const sn = crypto.randomBytes(64).toString("base64");
-  const req = socket("req");
-  req.connect(addr);
-  req.on("data", (msg) => {
-    const data: Object = msgpack.decode(msg);
-    if (sn === data["sn"]) {
-      if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
-        zlib.inflate(data["payload"], (e: Error, newbuf: Buffer) => {
-          if (e) {
-            req.close();
-            cb(e, null);
-          } else {
-            req.close();
-            cb(null, msgpack.decode(newbuf));
-          }
-        });
-      } else {
-        req.close();
-        cb(null, msgpack.decode(data["payload"]));
-      }
-    } else {
-      req.close();
-      cb(new Error("Invalid calling sequence number"), null);
-    }
   });
-  req.send(msgpack.encode({ sn, pkt: params }));
+
+  const options = {
+    hostname: host,
+    port: port,
+    path: path,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Length": data.length,
+    }
+  };
+
+  const req = http.request(options, (rep) => {
+    const chunks: Buffer[] = [];
+    rep.on("data", (chunk) => {
+      const buf = chunk as Buffer;
+      chunks.push(buf);
+    });
+    rep.on("end", () => {
+      const buffer = Buffer.concat(chunks);
+      const data = msgpack.decode(buffer);
+      cb(null, data);
+    });
+  });
+  req.on("error", (e) => {
+    cb(e, null);
+  });
+  // write data to request body
+  req.write(data);
+  req.end();
 }
 
-export function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T> {
-  const sn = crypto.randomBytes(64).toString("base64");
-  console.log(`rpcAsync domain: ${domain}, addr: ${addr}, uid: ${uid}, fun: ${fun}, args: ${JSON.stringify(args)}, sn: ${sn}`);
-  const start = new Date().getTime();
-  const p = new Promise<T>(function (resolve, reject) {
-    let a = [];
-    if (args != null) {
-      a = [...args];
+export function rpcAsync(domain: string, addr: string, uid: string, fun: string, ...args: any[]) {
+  const host = "127.0.0.1";
+  const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
+  const path = "/";
+  const openid = uid;
+  const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
+
+  const data: Buffer = msgpack.encode({
+    "mod": mod[0].toLowerCase(),
+    "fun": fun,
+    "arg": [...args],
+    "ctx": {
+      "wxuser": openid,
+    },
+  });
+
+  const options = {
+    hostname: host,
+    port: port,
+    path: path,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Length": data.length,
     }
-    const params = {
-      ctx: {
-        domain: domain,
-        ip:     ip.address(),
-        uid:    uid,
-      },
-      fun: fun,
-      args: a,
-    };
-    const req = socket("req");
-    req.connect(addr);
-    req.on("data", (msg) => {
-      const stop = new Date().getTime();
-      console.log(`rpcAsync onData, domain: ${domain}, addr: ${addr}, uid: ${uid}, fun: ${fun}, args: ${JSON.stringify(args)}, sn: ${sn}, done in ${stop - start} milliseconds`);
-      const data: Object = msgpack.decode(msg);
-      if (sn === data["sn"]) {
-        if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
-          zlib.inflate(data["payload"], (e: Error, newbuf: Buffer) => {
-            if (e) {
-              req.close();
-              reject(e);
-            } else {
-              req.close();
-              resolve(msgpack.decode(newbuf));
-            }
-          });
-        } else {
-          req.close();
-          resolve(msgpack.decode(data["payload"]));
-        }
-      } else {
-        req.close();
-        reject(new Error("Invalid calling sequence number"));
-      }
+  };
+
+  const p = new Promise<any>((resolve, reject) => {
+    const req = http.request(options, (rep) => {
+      const chunks: Buffer[] = [];
+      rep.on("data", (chunk) => {
+        const buf = chunk as Buffer;
+        chunks.push(buf);
+      });
+      rep.on("end", () => {
+        const buffer = Buffer.concat(chunks);
+        const data = msgpack.decode(buffer);
+        resolve(data);
+      });
+      rep.destroy();
     });
-    req.send(msgpack.encode({ sn, pkt: params }));
+    req.on("error", (e) => {
+      reject(e);
+    });
+    // write data to request body
+    req.write(data);
+    req.end();
   });
   return p;
 }

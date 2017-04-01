@@ -1,16 +1,24 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const msgpack = require("msgpack-lite");
-const crypto = require("crypto");
 const nanomsg_1 = require("nanomsg");
 const fs = require("fs");
-const ip = require("ip");
 const bluebird = require("bluebird");
 const zlib = require("zlib");
 const pg_1 = require("pg");
 const redis_1 = require("redis");
 const hive_disque_1 = require("hive-disque");
+const http = require("http");
 ;
+function get_response_addresses(addr) {
+    const lastnumber = parseInt(addr[addr.length - 1]);
+    const prefix = addr.substr(0, addr.length - 1);
+    const addresses = [];
+    for (let i = 0; i < 2; i++) {
+        addresses.push(prefix + (lastnumber + i).toString());
+    }
+    return addresses;
+}
 function server_msgpack(sn, obj, callback) {
     const payload = msgpack.encode(obj);
     if (payload.length > 1024) {
@@ -34,20 +42,15 @@ class Server {
     }
     init(modname, serveraddr, queueaddr, cache, loginfo, logerror, queue) {
         this.queueaddr = queueaddr;
-        this.rep = nanomsg_1.socket("rep");
-        this.rep.bind(serveraddr);
-        this.pub = nanomsg_1.socket("pub");
-        this.pub.bind(this.queueaddr);
-        const lastnumber = parseInt(serveraddr[serveraddr.length - 1]) + 1;
-        const newaddr = serveraddr.substr(0, serveraddr.length - 1) + lastnumber.toString();
-        this.pair = nanomsg_1.socket("pair");
-        this.pair.bind(newaddr);
+        if (this.queueaddr) {
+            this.pub = nanomsg_1.socket("pub");
+            this.pub.bind(this.queueaddr);
+        }
         this.queue = queue;
         this.loginfo = loginfo;
         this.logerror = logerror;
-        const _self = this;
-        for (const sock of [this.pair, this.rep]) {
-            sock.on("data", function (buf) {
+        for (const sock of get_response_addresses(serveraddr).map(x => { loginfo(x); const pair = nanomsg_1.socket("pair"); pair.bind(x); return pair; })) {
+            sock.on("data", ((buf) => {
                 const data = msgpack.decode(buf);
                 const pkt = data.pkt;
                 const sn = data.sn;
@@ -55,9 +58,9 @@ class Server {
                     cache, publish: undefined, push: undefined, report: undefined, sn });
                 const fun = pkt.fun;
                 const args = pkt.args;
-                if (_self.permissions.has(fun) && _self.permissions.get(fun).get(ctx.domain)) {
-                    const [asynced, impl] = _self.functions.get(fun);
-                    ctx.publish = (pkt) => _self.pub.send(msgpack.encode(Object.assign({}, pkt, { sn, domain: ctx.domain, uid: ctx.uid })));
+                if (this.permissions.has(fun) && this.permissions.get(fun).get(ctx.domain)) {
+                    const [asynced, impl] = this.functions.get(fun);
+                    ctx.publish = this.pub ? (pkt) => this.pub.send(msgpack.encode(Object.assign({}, pkt, { sn, domain: ctx.domain, uid: ctx.uid }))) : (pkt) => { logerror("Publish channel not exists"); };
                     ctx.push = (queuename, data, qsn) => {
                         const event = {
                             sn: qsn || sn,
@@ -65,13 +68,13 @@ class Server {
                             domain: ctx.domain,
                             uid: ctx.uid,
                         };
-                        if (_self.queue) {
+                        if (this.queue) {
                             msgpack_encode(event, (e, pkt) => {
                                 if (e) {
                                     logerror(e);
                                 }
                                 else {
-                                    _self.queue.addjob(queuename, pkt, { retry: 0 }, () => {
+                                    this.queue.addjob(queuename, pkt, { retry: 0 }, () => {
                                     }, (e) => {
                                         logerror(e);
                                     });
@@ -79,7 +82,7 @@ class Server {
                             });
                         }
                     };
-                    ctx.report = _self.queue ? (level, error) => {
+                    ctx.report = this.queue ? (level, error) => {
                         const payload = {
                             module: modname,
                             function: fun,
@@ -88,12 +91,11 @@ class Server {
                             args,
                         };
                         const pkt = msgpack.encode(payload);
-                        _self.queue.addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
+                        this.queue.addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
                             logerror(e);
                         });
                     } : (level, error) => {
                     };
-                    loginfo(`onCall ${modname}.${fun} ${JSON.stringify(args)} with sn ${sn}`);
                     if (!asynced) {
                         const func = impl;
                         try {
@@ -124,7 +126,7 @@ class Server {
                         }).catch(e => {
                             logerror(e);
                             ctx.report(0, e);
-                            const payload = msgpack.encode({ code: 500, msg: e.message });
+                            const payload = msgpack.encode({ code: 500, msg: e.stack + " func: " + fun });
                             msgpack_encode({ sn, payload }, (e, pkt) => {
                                 if (e) {
                                     logerror(e);
@@ -140,7 +142,7 @@ class Server {
                     const payload = msgpack.encode({ code: 403, msg: "Forbidden" });
                     sock.send(msgpack.encode({ sn, payload }));
                 }
-            });
+            }).bind(this));
         }
     }
     call(fun, permissions, name, description, impl) {
@@ -195,11 +197,10 @@ class Processor {
                 subprocessor.init(modname, this.subqueueaddr, pool, cache, loginfo, logerror, queue);
             }
         }
-        const _self = this;
-        this.sock.on("data", (buf) => {
+        this.sock.on("data", ((buf) => {
             const pkt = msgpack.decode(buf);
-            if (_self.functions.has(pkt.cmd)) {
-                const [asynced, impl] = _self.functions.get(pkt.cmd);
+            if (this.functions.has(pkt.cmd)) {
+                const [asynced, impl] = this.functions.get(pkt.cmd);
                 pool.connect((err, db, done) => {
                     if (err) {
                         const ctx = {
@@ -226,7 +227,7 @@ class Processor {
                             uid: pkt.uid,
                             sn: pkt.sn,
                             queue,
-                            publish: (pkt) => _self.pub ? _self.pub.send(msgpack.encode(pkt)) : undefined,
+                            publish: (pkt) => this.pub ? this.pub.send(msgpack.encode(pkt)) : undefined,
                             push: (queuename, data, qsn) => {
                                 const event = {
                                     sn: qsn || pkt.sn,
@@ -234,13 +235,13 @@ class Processor {
                                     domain: ctx.domain,
                                     uid: ctx.uid,
                                 };
-                                if (_self.queue) {
+                                if (this.queue) {
                                     msgpack_encode(event, (e, pkt) => {
                                         if (e) {
                                             logerror(e);
                                         }
                                         else {
-                                            _self.queue.addjob(queuename, pkt, { retry: 0 }, () => {
+                                            this.queue.addjob(queuename, pkt, { retry: 0 }, () => {
                                             }, (e) => {
                                                 logerror(e);
                                             });
@@ -318,7 +319,7 @@ class Processor {
             else {
                 loginfo(pkt.cmd + " not found!");
             }
-        });
+        }).bind(this));
     }
     registerSubProcessor(processor) {
         this.subprocessors.push(processor);
@@ -494,9 +495,11 @@ class Service {
         this.listeners.push(listener);
     }
     run() {
-        const path = this.config.queueaddr.substring(this.config.queueaddr.indexOf("///") + 2, this.config.queueaddr.length);
-        if (fs.existsSync(path)) {
-            fs.unlinkSync(path);
+        if (this.config.queueaddr) {
+            const path = this.config.queueaddr.substring(this.config.queueaddr.indexOf("///") + 2, this.config.queueaddr.length);
+            if (fs.existsSync(path)) {
+                fs.unlinkSync(path);
+            }
         }
         const cache = redis_1.createClient(this.config.cacheport ? this.config.cacheport : 6379, this.config.cachehost, { "return_buffers": true });
         const cacheAsync = bluebird.promisifyAll(cache);
@@ -624,98 +627,91 @@ function waitingAsync(ctx, sn = ctx.sn, retry = 7) {
 }
 exports.waitingAsync = waitingAsync;
 function rpc(domain, addr, uid, cb, fun, ...args) {
-    let a = [];
-    if (args != null) {
-        a = [...args];
-    }
-    const params = {
-        ctx: {
-            domain: domain,
-            ip: ip.address(),
-            uid: uid,
+    const host = "127.0.0.1";
+    const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
+    const path = "/";
+    const openid = uid;
+    const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
+    const data = msgpack.encode({
+        "mod": mod[0].toLowerCase(),
+        "fun": fun,
+        "arg": [...args],
+        "ctx": {
+            "wxuser": openid,
         },
-        fun: fun,
-        args: a
-    };
-    const sn = crypto.randomBytes(64).toString("base64");
-    const req = nanomsg_1.socket("req");
-    req.connect(addr);
-    req.on("data", (msg) => {
-        const data = msgpack.decode(msg);
-        if (sn === data["sn"]) {
-            if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
-                zlib.inflate(data["payload"], (e, newbuf) => {
-                    if (e) {
-                        req.close();
-                        cb(e, null);
-                    }
-                    else {
-                        req.close();
-                        cb(null, msgpack.decode(newbuf));
-                    }
-                });
-            }
-            else {
-                req.close();
-                cb(null, msgpack.decode(data["payload"]));
-            }
-        }
-        else {
-            req.close();
-            cb(new Error("Invalid calling sequence number"), null);
-        }
     });
-    req.send(msgpack.encode({ sn, pkt: params }));
+    const options = {
+        hostname: host,
+        port: port,
+        path: path,
+        method: "POST",
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": data.length,
+        }
+    };
+    const req = http.request(options, (rep) => {
+        const chunks = [];
+        rep.on("data", (chunk) => {
+            const buf = chunk;
+            chunks.push(buf);
+        });
+        rep.on("end", () => {
+            const buffer = Buffer.concat(chunks);
+            const data = msgpack.decode(buffer);
+            cb(null, data);
+        });
+    });
+    req.on("error", (e) => {
+        cb(e, null);
+    });
+    req.write(data);
+    req.end();
 }
 exports.rpc = rpc;
 function rpcAsync(domain, addr, uid, fun, ...args) {
-    const sn = crypto.randomBytes(64).toString("base64");
-    console.log(`rpcAsync domain: ${domain}, addr: ${addr}, uid: ${uid}, fun: ${fun}, args: ${JSON.stringify(args)}, sn: ${sn}`);
-    const start = new Date().getTime();
-    const p = new Promise(function (resolve, reject) {
-        let a = [];
-        if (args != null) {
-            a = [...args];
+    const host = "127.0.0.1";
+    const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
+    const path = "/";
+    const openid = uid;
+    const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
+    const data = msgpack.encode({
+        "mod": mod[0].toLowerCase(),
+        "fun": fun,
+        "arg": [...args],
+        "ctx": {
+            "wxuser": openid,
+        },
+    });
+    const options = {
+        hostname: host,
+        port: port,
+        path: path,
+        method: "POST",
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": data.length,
         }
-        const params = {
-            ctx: {
-                domain: domain,
-                ip: ip.address(),
-                uid: uid,
-            },
-            fun: fun,
-            args: a,
-        };
-        const req = nanomsg_1.socket("req");
-        req.connect(addr);
-        req.on("data", (msg) => {
-            const stop = new Date().getTime();
-            console.log(`rpcAsync onData, domain: ${domain}, addr: ${addr}, uid: ${uid}, fun: ${fun}, args: ${JSON.stringify(args)}, sn: ${sn}, done in ${stop - start} milliseconds`);
-            const data = msgpack.decode(msg);
-            if (sn === data["sn"]) {
-                if (data["payload"][0] === 0x78 && data["payload"][1] === 0x9c) {
-                    zlib.inflate(data["payload"], (e, newbuf) => {
-                        if (e) {
-                            req.close();
-                            reject(e);
-                        }
-                        else {
-                            req.close();
-                            resolve(msgpack.decode(newbuf));
-                        }
-                    });
-                }
-                else {
-                    req.close();
-                    resolve(msgpack.decode(data["payload"]));
-                }
-            }
-            else {
-                req.close();
-                reject(new Error("Invalid calling sequence number"));
-            }
+    };
+    const p = new Promise((resolve, reject) => {
+        const req = http.request(options, (rep) => {
+            const chunks = [];
+            rep.on("data", (chunk) => {
+                const buf = chunk;
+                chunks.push(buf);
+            });
+            rep.on("end", () => {
+                const buffer = Buffer.concat(chunks);
+                const data = msgpack.decode(buffer);
+                resolve(data);
+            });
+            rep.destroy();
         });
-        req.send(msgpack.encode({ sn, pkt: params }));
+        req.on("error", (e) => {
+            reject(e);
+        });
+        req.write(data);
+        req.end();
     });
     return p;
 }

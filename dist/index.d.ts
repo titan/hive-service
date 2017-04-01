@@ -60,6 +60,12 @@ export interface ErrorPacket {
     error: Error;
     args?: any[];
 }
+export interface Result<T> {
+    code: number;
+    data?: T;
+    msg?: string;
+    now?: Date;
+}
 export interface CmdPacket {
     domain?: string;
     uid?: string;
@@ -74,16 +80,14 @@ export interface ServerContext extends Context {
     push: (queuename: string, data: any, qsn?: string) => void;
 }
 export interface ServerFunction {
-    (ctx: ServerContext, rep: ((result: any) => void), ...rest: any[]): void;
+    (ctx: ServerContext, rep: ((result: Result<any>) => void), ...rest: any[]): void;
 }
 export interface AsyncServerFunction {
-    (ctx: ServerContext, ...rest: any[]): Promise<any>;
+    (ctx: ServerContext, ...rest: any[]): Promise<Result<any>>;
 }
 export declare class Server {
     queueaddr: string;
-    rep: Socket;
     pub: Socket;
-    pair: Socket;
     queue: Disq;
     loginfo: Function;
     logerror: Function;
@@ -105,7 +109,7 @@ export interface ProcessorFunction {
     (ctx: ProcessorContext, ...args: any[]): void;
 }
 export interface AsyncProcessorFunction {
-    (ctx: ProcessorContext, ...args: any[]): Promise<any>;
+    (ctx: ProcessorContext, ...args: any[]): Promise<Result<any>>;
 }
 export declare class Processor {
     modname: string;
@@ -176,12 +180,12 @@ export declare class Service {
 }
 export declare function fib(n: number): number;
 export declare function fiball(n: number): number;
-export declare function waiting(ctx: Context, rep: ((result: any) => void), sn?: string, retry?: number): void;
-export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: any) => void), retry?: number): void;
-export declare function set_for_response(cache: RedisClient, key: string, value: any, timeout?: number): Promise<any>;
-export declare function waitingAsync(ctx: Context, sn?: string, retry?: number): Promise<any>;
-export declare function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: any) => void), fun: string, ...args: any[]): void;
-export declare function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<T>;
+export declare function waiting(ctx: Context, rep: ((result: Result<any>) => void), sn?: string, retry?: number): void;
+export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: Result<any>) => void), retry?: number): void;
+export declare function set_for_response(cache: RedisClient, key: string, value: Result<any>, timeout?: number): Promise<any>;
+export declare function waitingAsync(ctx: Context, sn?: string, retry?: number): Promise<Result<any>>;
+export declare function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: Result<any>) => void), fun: string, ...args: any[]): void;
+export declare function rpcAsync(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<any>;
 export interface Paging<T> {
     count: number;
     offset: number;

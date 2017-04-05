@@ -794,7 +794,7 @@ export function waitingAsync(ctx: Context, sn: string = ctx.sn, retry: number = 
   });
 }
 
-export function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: Result<any>) => void), fun: string, ...args: any[]) {
+export function rpc<T>(domain: string, addr: string, uid: string, cb: ((e: Error, result: Result<T>) => void), fun: string, ...args: any[]) {
   const host = "127.0.0.1";
   const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
   const path = "/";
@@ -841,7 +841,7 @@ export function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, r
   req.end();
 }
 
-export function rpcAsync(domain: string, addr: string, uid: string, fun: string, ...args: any[]) {
+export function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]) : Promise<Result<T>> {
   const host = "127.0.0.1";
   const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
   const path = "/";

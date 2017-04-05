@@ -184,8 +184,8 @@ export declare function waiting(ctx: Context, rep: ((result: Result<any>) => voi
 export declare function wait_for_response(cache: RedisClient, reply: string, rep: ((result: Result<any>) => void), retry?: number): void;
 export declare function set_for_response(cache: RedisClient, key: string, value: Result<any>, timeout?: number): Promise<any>;
 export declare function waitingAsync(ctx: Context, sn?: string, retry?: number): Promise<Result<any>>;
-export declare function rpc(domain: string, addr: string, uid: string, cb: ((e: Error, result: Result<any>) => void), fun: string, ...args: any[]): void;
-export declare function rpcAsync(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<any>;
+export declare function rpc<T>(domain: string, addr: string, uid: string, cb: ((e: Error, result: Result<T>) => void), fun: string, ...args: any[]): void;
+export declare function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<Result<T>>;
 export interface Paging<T> {
     count: number;
     offset: number;

@@ -104,7 +104,8 @@ function get_response_addresses(addr: string) {
   const lastnumber = parseInt(addr[addr.length - 1]);
   const prefix = addr.substr(0, addr.length - 1);
   const addresses = [];
-  for (let i = 0; i < 2; i ++) {
+  const limit = parseInt(process.env["MAX_GATEWAY"] || 3);
+  for (let i = 0; i < limit; i ++) {
     addresses.push(prefix + (lastnumber + i).toString());
   }
   return addresses;

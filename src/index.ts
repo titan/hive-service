@@ -796,9 +796,9 @@ export function waitingAsync(ctx: Context, sn: string = ctx.sn, retry: number = 
 }
 
 export function rpc<T>(domain: string, addr: string, uid: string, cb: ((e: Error, result: Result<T>) => void), fun: string, ...args: any[]) {
-  const host = "127.0.0.1";
+  const host = process.env["RPC-HOST"] || "127.0.0.1";
   const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
-  const path = "/";
+  const path = process.env["RPC-PATH"] || "/";
   const openid = uid;
   const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
 
@@ -843,9 +843,9 @@ export function rpc<T>(domain: string, addr: string, uid: string, cb: ((e: Error
 }
 
 export function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]) : Promise<Result<T>> {
-  const host = "127.0.0.1";
+  const host = process.env["RPC-HOST"] || "127.0.0.1";
   const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
-  const path = "/";
+  const path = process.env["RPC-PATH"] || "/";
   const openid = uid;
   const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
 

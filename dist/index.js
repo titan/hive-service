@@ -628,9 +628,9 @@ function waitingAsync(ctx, sn = ctx.sn, retry = 7) {
 }
 exports.waitingAsync = waitingAsync;
 function rpc(domain, addr, uid, cb, fun, ...args) {
-    const host = "127.0.0.1";
+    const host = process.env["RPC-HOST"] || "127.0.0.1";
     const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
-    const path = "/";
+    const path = process.env["RPC-PATH"] || "/";
     const openid = uid;
     const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
     const data = msgpack.encode({
@@ -671,9 +671,9 @@ function rpc(domain, addr, uid, cb, fun, ...args) {
 }
 exports.rpc = rpc;
 function rpcAsync(domain, addr, uid, fun, ...args) {
-    const host = "127.0.0.1";
+    const host = process.env["RPC-HOST"] || "127.0.0.1";
     const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
-    const path = "/";
+    const path = process.env["RPC-PATH"] || "/";
     const openid = uid;
     const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
     const data = msgpack.encode({

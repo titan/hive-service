@@ -21,7 +21,7 @@ declare module "redis" {
         incrbyAsync(key: string, increment: number): Promise<any>;
         keysAsync(key: string): Promise<any>;
         lindexAsync(key: string, index: number): Promise<any>;
-        llenAsync(key: string): Promise<any>;
+        llenAsync(key: string): Promise<number>;
         lpopAsync(key: string): Promise<any>;
         lpushAsync(key: string, value: string | number | Buffer): Promise<any>;
         lrangeAsync(key: string, start: number, stop: number): Promise<any>;
@@ -35,9 +35,10 @@ declare module "redis" {
         sismemberAsync(key: string, value: string | Buffer): Promise<any>;
         smembersAsync(key: string): Promise<any>;
         zaddAsync(key: string, score: number, member: string | number | Buffer): Promise<any>;
-        zcountAsync(key: string, min: string | number, max: string | number): Promise<any>;
+        zcountAsync(key: string, min: string | number, max: string | number): Promise<number>;
         zrangeAsync(key: string, start: number, stop: number): Promise<any[]>;
         zrangebyscoreAsync(key: string, min: number | string, max: number | string, limit?: string, offset?: number, count?: number): Promise<any[]>;
+        zrankAsync(key: string, member: string | number | Buffer): Promise<number>;
         zremAsync(key: string, value: any): Promise<any>;
         zremrangebyscoreAsync(key: string, start: number | string, stop: number | string): Promise<any>;
         zrevrangeAsync(key: string, start: number, stop: number): Promise<any[]>;

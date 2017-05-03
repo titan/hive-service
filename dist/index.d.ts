@@ -77,6 +77,13 @@ export interface CmdPacket {
     args: any[];
 }
 export declare type Permission = [string, boolean];
+export declare class QueueProvider {
+    addresses: string[];
+    disque: Disq;
+    constructor(addresses: string[]);
+    instance(): Disq;
+    error(e: Error): void;
+}
 export interface ServerContext extends Context {
     ip: string;
     publish: ((pkg: CmdPacket) => void);
@@ -91,19 +98,19 @@ export interface AsyncServerFunction {
 export declare class Server {
     queueaddr: string;
     pub: Socket;
-    queue: Disq;
     loginfo: Function;
     logerror: Function;
+    queue_provider: QueueProvider;
     functions: Map<string, [boolean, ServerFunction | AsyncServerFunction]>;
     permissions: Map<string, Map<string, boolean>>;
     constructor();
-    init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void;
+    init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, loginfo: Function, logerror: Function, queue_provider?: QueueProvider): void;
     call(fun: string, permissions: Permission[], name: string, description: string, impl: ServerFunction): void;
     callAsync(fun: string, permissions: Permission[], name: string, description: string, impl: AsyncServerFunction): void;
 }
 export interface ProcessorContext extends Context {
     db: PGClient;
-    queue?: Disq;
+    queue_provider?: QueueProvider;
     publish: ((pkg: CmdPacket) => void);
     push: (queuename: string, data: any, qsn?: string) => void;
     logerror: Function;
@@ -122,9 +129,9 @@ export declare class Processor {
     functions: Map<string, [boolean, ProcessorFunction | AsyncProcessorFunction]>;
     subqueueaddr: string;
     subprocessors: Processor[];
-    queue: Disq;
+    queue_provider: QueueProvider;
     constructor(subqueueaddr?: string);
-    init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue?: Disq): void;
+    init(modname: string, queueaddr: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue_provider?: QueueProvider): void;
     registerSubProcessor(processor: Processor): void;
     call(cmd: string, impl: ProcessorFunction): void;
     callAsync(cmd: string, impl: AsyncProcessorFunction): void;
@@ -137,7 +144,7 @@ export interface BusinessEventPacket {
 }
 export interface BusinessEventContext extends Context {
     pool: Pool;
-    queue: Disq;
+    queue_provider: QueueProvider;
     queuename: string;
     handler: BusinessEventHandlerFunction;
     loginfo: Function;
@@ -151,7 +158,7 @@ export declare class BusinessEventListener {
     queuename: string;
     handler: BusinessEventHandlerFunction;
     constructor(queuename: string);
-    init(modname: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue: Disq): void;
+    init(modname: string, pool: Pool, cache: RedisClient, loginfo: Function, logerror: Function, queue_provider: QueueProvider): void;
     onEvent(handler: BusinessEventHandlerFunction): void;
 }
 export interface Config {

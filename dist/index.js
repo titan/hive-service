@@ -700,9 +700,12 @@ function rpcAsync(domain, addr, uid, fun, ...args) {
     const port = process.env["GATEWAY-" + (domain.toUpperCase()) + "-PORT"] || 8000;
     const path = process.env["RPC-PATH"] || "/";
     const openid = uid;
-    const mod = Object.keys(process.env).filter(x => process.env[x] === addr);
+    const mods = Object.keys(process.env).filter(x => process.env[x] === addr);
+    if (mods === null || mods.length === 0) {
+        return Promise.resolve({ code: 404, msg: `Module with address(${addr}) not found!` });
+    }
     const data = msgpack.encode({
-        "mod": mod[0].toLowerCase(),
+        "mod": mods[0].toLowerCase(),
         "fun": fun,
         "arg": [...args],
         "ctx": {

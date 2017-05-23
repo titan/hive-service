@@ -166,6 +166,19 @@ export class Server {
   }
 
   public init(modname: string, serveraddr: string, queueaddr: string, cache: RedisClient, loginfo: Function, logerror: Function, queue_provider?: QueueProvider): void {
+    function handle_function_exception(ctx: ServerContext, sock: Socket, fun: string, sn: string, e: Error) {
+      logerror(e);
+      ctx.report(0, e);
+      const regexp = /[0-9]{3}/;
+      const payload = msgpack.encode((e.name && regexp.test(e.name)) ? { code: e.name, msg: e.message } : { code: 500, msg: e.stack + " function: " + fun});
+      msgpack_encode({ sn, payload }, (e: Error, pkt: Buffer) => {
+        if (e) {
+          logerror(e);
+        } else {
+          sock.send(pkt);
+        }
+      });
+    };
     this.queueaddr = queueaddr;
     if (this.queueaddr) {
       this.pub = socket("pub");
@@ -238,15 +251,7 @@ export class Server {
                 server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
               });
             } catch (e) {
-              logerror(e);
-              const payload = msgpack.encode({ code: 500, msg: e.message });
-              msgpack_encode({ sn, payload }, (e: Error, pkt: Buffer) => {
-                if (e) {
-                  logerror(e);
-                } else {
-                  sock.send(pkt);
-                }
-              });
+              handle_function_exception(ctx, sock, fun, sn, e);
             }
           } else {
             const func = impl as AsyncServerFunction;
@@ -254,16 +259,7 @@ export class Server {
             result.then(result => {
               server_msgpack(sn, result, (buf: Buffer) => { sock.send(buf); });
             }).catch(e => {
-              logerror(e);
-              ctx.report(0, e);
-              const payload = msgpack.encode({ code: 500, msg: e.stack + " func: " + fun});
-              msgpack_encode({ sn, payload }, (e: Error, pkt: Buffer) => {
-                if (e) {
-                  logerror(e);
-                } else {
-                  sock.send(pkt);
-                }
-              });
+              handle_function_exception(ctx, sock, fun, sn, e);
             });
           }
         } else {

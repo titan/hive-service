@@ -59,6 +59,21 @@ class Server {
         this.permissions = new Map();
     }
     init(modname, serveraddr, queueaddr, cache, loginfo, logerror, queue_provider) {
+        function handle_function_exception(ctx, sock, fun, sn, e) {
+            logerror(e);
+            ctx.report(0, e);
+            const regexp = /[0-9]{3}/;
+            const payload = msgpack.encode((e.name && regexp.test(e.name)) ? { code: e.name, msg: e.message } : { code: 500, msg: e.stack + " function: " + fun });
+            msgpack_encode({ sn, payload }, (e, pkt) => {
+                if (e) {
+                    logerror(e);
+                }
+                else {
+                    sock.send(pkt);
+                }
+            });
+        }
+        ;
         this.queueaddr = queueaddr;
         if (this.queueaddr) {
             this.pub = nanomsg_1.socket("pub");
@@ -126,16 +141,7 @@ class Server {
                             });
                         }
                         catch (e) {
-                            logerror(e);
-                            const payload = msgpack.encode({ code: 500, msg: e.message });
-                            msgpack_encode({ sn, payload }, (e, pkt) => {
-                                if (e) {
-                                    logerror(e);
-                                }
-                                else {
-                                    sock.send(pkt);
-                                }
-                            });
+                            handle_function_exception(ctx, sock, fun, sn, e);
                         }
                     }
                     else {
@@ -144,17 +150,7 @@ class Server {
                         result.then(result => {
                             server_msgpack(sn, result, (buf) => { sock.send(buf); });
                         }).catch(e => {
-                            logerror(e);
-                            ctx.report(0, e);
-                            const payload = msgpack.encode({ code: 500, msg: e.stack + " func: " + fun });
-                            msgpack_encode({ sn, payload }, (e, pkt) => {
-                                if (e) {
-                                    logerror(e);
-                                }
-                                else {
-                                    sock.send(pkt);
-                                }
-                            });
+                            handle_function_exception(ctx, sock, fun, sn, e);
                         });
                     }
                 }

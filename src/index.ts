@@ -926,9 +926,9 @@ export function rpcAsync<T>(domain: string, addr: string, uid: string, fun: stri
 }
 
 export interface Paging<T> {
+  count: number;
   start: number;
   stop: number;
-  limit: number;
   data: T[];
 }
 

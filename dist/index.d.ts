@@ -197,9 +197,9 @@ export declare function waitingAsync(ctx: Context, sn?: string, retry?: number):
 export declare function rpc<T>(domain: string, addr: string, uid: string, cb: ((e: Error, result: Result<T>) => void), fun: string, ...args: any[]): void;
 export declare function rpcAsync<T>(domain: string, addr: string, uid: string, fun: string, ...args: any[]): Promise<Result<T>>;
 export interface Paging<T> {
+    count: number;
     start: number;
     stop: number;
-    limit: number;
     data: T[];
 }
 export declare function msgpack_encode_async(obj: any): Promise<Buffer>;

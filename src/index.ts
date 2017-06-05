@@ -218,10 +218,11 @@ export class Server {
                 if (e) {
                   logerror(e);
                 } else {
-                  this.queue_provider.instance().addjob(queuename, pkt, { retry: 0 }, () => {
-                  }, (e: Error) => {
-                    logerror(e);
-                    this.queue_provider.error(e);
+                  this.queue_provider.instance().addjob(queuename, pkt, { retry: 0 }, (e: Error) => {
+                    if (e) {
+                      logerror(e);
+                      this.queue_provider.error(e);
+                    }
                   });
                 }
               });
@@ -236,9 +237,11 @@ export class Server {
               args,
             };
             const pkt = msgpack.encode(payload);
-            this.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, () => {}, (e: Error) => {
-              this.logerror(e);
-              this.queue_provider.error(e);
+            this.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, (e: Error) => {
+              if (e) {
+                this.logerror(e);
+                this.queue_provider.error(e);
+              }
             });
           } : (level: number, error: Error) => {
           };
@@ -292,10 +295,11 @@ function report_processor_error(ctx: ProcessorContext, fun: string, level: numbe
   };
   const pkt = msgpack.encode(payload);
   if (ctx.queue_provider) {
-    ctx.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, () => {
-    }, (e: Error) => {
-      ctx.logerror(e);
-      ctx.queue_provider.error(e);
+    ctx.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, (e: Error) => {
+      if (e) {
+        ctx.logerror(e);
+        ctx.queue_provider.error(e);
+      }
     });
   }
 }
@@ -393,10 +397,11 @@ export class Processor {
                     if (e) {
                       logerror(e);
                     } else {
-                      this.queue_provider.instance().addjob(queuename, pkt, { retry: 0 }, () => {
-                      }, (e: Error) => {
-                        logerror(e);
-                        this.queue_provider.error(e);
+                      this.queue_provider.instance().addjob(queuename, pkt, { retry: 0 }, (e: Error) => {
+                        if (e) {
+                          logerror(e);
+                          this.queue_provider.error(e);
+                        }
                       });
                     }
                   });
@@ -410,9 +415,11 @@ export class Processor {
                   error,
                 };
                 const epkt = msgpack.encode(payload);
-                this.queue_provider.instance().addjob("hive-errors", epkt, { retry: 0 }, () => {}, (e: Error) => {
-                  logerror(e);
-                  this.queue_provider.error(e);
+                this.queue_provider.instance().addjob("hive-errors", epkt, { retry: 0 }, (e: Error) => {
+                  if (e) {
+                    logerror(e);
+                    this.queue_provider.error(e);
+                  }
                 });
               } : (level: number, error: Error) => {
                 logerror(error);
@@ -513,11 +520,11 @@ function report_timer_error(ctx: BusinessEventContext, fun: string, level: numbe
     error: e,
   };
   const pkt = msgpack.encode(payload);
-  ctx.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, () => {
-    callback();
-  }, (e: Error) => {
-    ctx.logerror(e);
-    ctx.queue_provider.error(e);
+  ctx.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, (e: Error) => {
+    if (e) {
+      ctx.logerror(e);
+      ctx.queue_provider.error(e);
+    }
     callback();
   });
 }
@@ -527,7 +534,14 @@ function business_event_loop(ctx: BusinessEventContext) {
     timeout: 10,
     count: 1,
   };
-  ctx.queue_provider.instance().getjob(ctx.queuename, options, jobs => {
+  ctx.queue_provider.instance().getjob(ctx.queuename, options, (e: Error, jobs) => {
+    if (e) {
+      ctx.logerror(e);
+      ctx.queue_provider.error(e);
+      report_timer_error(ctx, "business_event_loop/getjob.error", 0, e, () => { setTimeout(business_event_loop, 1000, ctx); });
+      return;
+    }
+
     if (jobs.length > 0) {
       const job = jobs[0];
       const body = job.body as Buffer;
@@ -600,10 +614,6 @@ function business_event_loop(ctx: BusinessEventContext) {
     } else {
       setTimeout(business_event_loop, 1000, ctx);
     }
-  }, (e: Error) => {
-    ctx.logerror(e);
-    ctx.queue_provider.error(e);
-    report_timer_error(ctx, "business_event_loop/getjob.error", 0, e, () => { setTimeout(business_event_loop, 1000, ctx); });
   });
 }
 
@@ -629,9 +639,11 @@ export class BusinessEventListener {
           error,
         };
         const pkt = msgpack.encode(payload);
-        queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, () => {}, (e: Error) => {
-          logerror(e);
-          queue_provider.error(e);
+        queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, (e: Error) => {
+          if (e) {
+            logerror(e);
+            queue_provider.error(e);
+          }
         });
       },
       modname,

@@ -1,5 +1,4 @@
 /// <reference types="node" />
-/// <reference types="nanomsg" />
 import { Socket } from "nanomsg";
 import { Pool, Client as PGClient } from "pg";
 import { RedisClient } from "redis";

@@ -107,10 +107,11 @@ class Server {
                                     logerror(e);
                                 }
                                 else {
-                                    this.queue_provider.instance().addjob(queuename, pkt, { retry: 0 }, () => {
-                                    }, (e) => {
-                                        logerror(e);
-                                        this.queue_provider.error(e);
+                                    this.queue_provider.instance().addjob(queuename, pkt, { retry: 0 }, (e) => {
+                                        if (e) {
+                                            logerror(e);
+                                            this.queue_provider.error(e);
+                                        }
                                     });
                                 }
                             });
@@ -125,9 +126,11 @@ class Server {
                             args,
                         };
                         const pkt = msgpack.encode(payload);
-                        this.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
-                            this.logerror(e);
-                            this.queue_provider.error(e);
+                        this.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, (e) => {
+                            if (e) {
+                                this.logerror(e);
+                                this.queue_provider.error(e);
+                            }
                         });
                     } : (level, error) => {
                     };
@@ -182,10 +185,11 @@ function report_processor_error(ctx, fun, level, e, args) {
     };
     const pkt = msgpack.encode(payload);
     if (ctx.queue_provider) {
-        ctx.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, () => {
-        }, (e) => {
-            ctx.logerror(e);
-            ctx.queue_provider.error(e);
+        ctx.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, (e) => {
+            if (e) {
+                ctx.logerror(e);
+                ctx.queue_provider.error(e);
+            }
         });
     }
 }
@@ -258,10 +262,11 @@ class Processor {
                                             logerror(e);
                                         }
                                         else {
-                                            this.queue_provider.instance().addjob(queuename, pkt, { retry: 0 }, () => {
-                                            }, (e) => {
-                                                logerror(e);
-                                                this.queue_provider.error(e);
+                                            this.queue_provider.instance().addjob(queuename, pkt, { retry: 0 }, (e) => {
+                                                if (e) {
+                                                    logerror(e);
+                                                    this.queue_provider.error(e);
+                                                }
                                             });
                                         }
                                     });
@@ -275,9 +280,11 @@ class Processor {
                                     error,
                                 };
                                 const epkt = msgpack.encode(payload);
-                                this.queue_provider.instance().addjob("hive-errors", epkt, { retry: 0 }, () => { }, (e) => {
-                                    logerror(e);
-                                    this.queue_provider.error(e);
+                                this.queue_provider.instance().addjob("hive-errors", epkt, { retry: 0 }, (e) => {
+                                    if (e) {
+                                        logerror(e);
+                                        this.queue_provider.error(e);
+                                    }
                                 });
                             } : (level, error) => {
                                 logerror(error);
@@ -360,11 +367,11 @@ function report_timer_error(ctx, fun, level, e, callback) {
         error: e,
     };
     const pkt = msgpack.encode(payload);
-    ctx.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, () => {
-        callback();
-    }, (e) => {
-        ctx.logerror(e);
-        ctx.queue_provider.error(e);
+    ctx.queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, (e) => {
+        if (e) {
+            ctx.logerror(e);
+            ctx.queue_provider.error(e);
+        }
         callback();
     });
 }
@@ -373,7 +380,13 @@ function business_event_loop(ctx) {
         timeout: 10,
         count: 1,
     };
-    ctx.queue_provider.instance().getjob(ctx.queuename, options, jobs => {
+    ctx.queue_provider.instance().getjob(ctx.queuename, options, (e, jobs) => {
+        if (e) {
+            ctx.logerror(e);
+            ctx.queue_provider.error(e);
+            report_timer_error(ctx, "business_event_loop/getjob.error", 0, e, () => { setTimeout(business_event_loop, 1000, ctx); });
+            return;
+        }
         if (jobs.length > 0) {
             const job = jobs[0];
             const body = job.body;
@@ -456,10 +469,6 @@ function business_event_loop(ctx) {
         else {
             setTimeout(business_event_loop, 1000, ctx);
         }
-    }, (e) => {
-        ctx.logerror(e);
-        ctx.queue_provider.error(e);
-        report_timer_error(ctx, "business_event_loop/getjob.error", 0, e, () => { setTimeout(business_event_loop, 1000, ctx); });
     });
 }
 class BusinessEventListener {
@@ -481,9 +490,11 @@ class BusinessEventListener {
                     error,
                 };
                 const pkt = msgpack.encode(payload);
-                queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, () => { }, (e) => {
-                    logerror(e);
-                    queue_provider.error(e);
+                queue_provider.instance().addjob("hive-errors", pkt, { retry: 0 }, (e) => {
+                    if (e) {
+                        logerror(e);
+                        queue_provider.error(e);
+                    }
                 });
             },
             modname,

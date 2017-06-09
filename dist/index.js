@@ -550,17 +550,21 @@ class Service {
         if (this.config.queuehost) {
             const port = this.config.queueport ? this.config.queueport : 7711;
             const queue = new hive_disque_1.Disq({ nodes: [`${this.config.queuehost}:${port}`] });
-            this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, new QueueProvider([`${this.config.queuehost}:${port}`]));
-            for (const processor of this.processors) {
+            if (this.server) {
+                this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, new QueueProvider([`${this.config.queuehost}:${port}`]));
+            }
+            for (const processor of this.processors || []) {
                 processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, new QueueProvider([`${this.config.queuehost}:${port}`]));
             }
-            for (const listener of this.listeners) {
+            for (const listener of this.listeners || []) {
                 listener.init(this.config.modname, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log, new QueueProvider([`${this.config.queuehost}:${port}`]));
             }
         }
         else {
-            this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log);
-            for (const processor of this.processors) {
+            if (this.server) {
+                this.server.init(this.config.modname, this.config.serveraddr, this.config.queueaddr, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log);
+            }
+            for (const processor of this.processors || []) {
                 processor.init(this.config.modname, this.config.queueaddr, pool, cacheAsync, this.config.loginfo || console.log, this.config.logerror || console.log);
             }
         }
